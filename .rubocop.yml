@@ -1,0 +1,54 @@
+AllCops:
+  NewCops: enable
+  TargetRubyVersion: 3.1
+  Exclude:
+    - 'examples/**/*'
+    - 'test/run.rb'
+
+# Allow longer methods for adapters (they're dynamically generated)
+Metrics/MethodLength:
+  Max: 30
+  Exclude:
+    - 'lib/rails_otel_goodies/adapters/**/*'
+    - 'lib/rails_otel_goodies/activerecord_context.rb'
+
+# Allow higher complexity for adapters
+Metrics/AbcSize:
+  Max: 25
+  Exclude:
+    - 'lib/rails_otel_goodies/adapters/**/*'
+    - 'lib/rails_otel_goodies/activerecord_context.rb'
+
+Metrics/CyclomaticComplexity:
+  Max: 10
+  Exclude:
+    - 'lib/rails_otel_goodies/activerecord_context.rb'
+
+Metrics/PerceivedComplexity:
+  Max: 10
+  Exclude:
+    - 'lib/rails_otel_goodies/activerecord_context.rb'
+
+# Longer blocks are OK for test setup
+Metrics/BlockLength:
+  Exclude:
+    - 'test/**/*'
+    - 'lib/rails_otel_goodies/adapters/**/*'
+
+Metrics/ClassLength:
+  Max: 150
+
+# Don't require documentation for every class (we have comprehensive README)
+Style/Documentation:
+  Enabled: false
+
+# Allow memoization without @ prefix matching
+Naming/MemoizedInstanceVariableName:
+  Enabled: false
+
+# These are stylistic preferences
+Style/IfUnlessModifier:
+  Enabled: false
+
+Style/WordArray:
+  Enabled: false

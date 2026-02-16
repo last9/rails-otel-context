@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(chmod:*)",
+      "Bash(./rename_to_rails_otel_goodies.sh:*)",
+      "Bash(ruby update_files.rb:*)",
+      "Bash(find:*)",
+      "Bash(ruby run.rb:*)",
+      "Bash(ruby test/run.rb:*)",
+      "Bash(ruby:*)",
+      "Bash(for test in test/*_test.rb)",
+      "Bash(do)",
+      "Bash(if [[ \"$test\" != *\"railtie_test\"* ]])",
+      "Bash(then)",
+      "Bash(echo:*)",
+      "Bash(fi)",
+      "Bash(done)",
+      "Bash(rubocop:*)",
+      "Bash(gem list:*)",
+      "Bash(git init:*)",
+      "Bash(git add:*)"
+    ]
+  }
+}
