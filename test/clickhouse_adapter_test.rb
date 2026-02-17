@@ -7,11 +7,11 @@ class ClickhouseAdapterTest < Minitest::Test
   include SpanHelpers
 
   def setup
-    RailsOtelGoodies::Adapters::Clickhouse.instance_variable_set(:@patch_modules, nil)
+    RailsOtelContext::Adapters::Clickhouse.instance_variable_set(:@patch_modules, nil)
   end
 
   def test_query_creates_span_with_slow_source_attributes
-    patch = RailsOtelGoodies::Adapters::Clickhouse.send(:build_patch_module, [:query])
+    patch = RailsOtelContext::Adapters::Clickhouse.send(:build_patch_module, [:query])
     patch.configure(app_root: Dir.pwd, threshold_ms: 0.0)
 
     client_class = Class.new do
@@ -39,7 +39,7 @@ class ClickhouseAdapterTest < Minitest::Test
   end
 
   def test_query_omits_slow_source_attributes_when_below_threshold
-    patch = RailsOtelGoodies::Adapters::Clickhouse.send(:build_patch_module, [:query])
+    patch = RailsOtelContext::Adapters::Clickhouse.send(:build_patch_module, [:query])
     patch.configure(app_root: Dir.pwd, threshold_ms: 999_999.0)
 
     client_class = Class.new do
@@ -68,7 +68,7 @@ class ClickhouseAdapterTest < Minitest::Test
 
     if had_original
       thread_singleton.class_eval do
-        alias_method :__otel_goodies_original_each_caller_location, :each_caller_location
+        alias_method :__rails_otel_context_original_each_caller_location, :each_caller_location
       end
     end
     thread_singleton.define_method(:each_caller_location) { |&block| block.call(location) }
@@ -77,8 +77,8 @@ class ClickhouseAdapterTest < Minitest::Test
   ensure
     if had_original
       thread_singleton.class_eval do
-        alias_method :each_caller_location, :__otel_goodies_original_each_caller_location
-        remove_method :__otel_goodies_original_each_caller_location
+        alias_method :each_caller_location, :__rails_otel_context_original_each_caller_location
+        remove_method :__rails_otel_context_original_each_caller_location
       end
     else
       thread_singleton.class_eval { remove_method :each_caller_location }
@@ -111,15 +111,15 @@ class ClickhouseAdapterTest < Minitest::Test
 
     singleton = OpenTelemetry.singleton_class
     singleton.class_eval do
-      alias_method :__otel_goodies_original_tracer_provider, :tracer_provider
+      alias_method :__rails_otel_context_original_tracer_provider, :tracer_provider
       define_method(:tracer_provider) { fake_provider }
     end
 
     yield calls
   ensure
     singleton.class_eval do
-      alias_method :tracer_provider, :__otel_goodies_original_tracer_provider
-      remove_method :__otel_goodies_original_tracer_provider
+      alias_method :tracer_provider, :__rails_otel_context_original_tracer_provider
+      remove_method :__rails_otel_context_original_tracer_provider
     end
   end
 end

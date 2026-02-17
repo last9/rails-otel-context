@@ -1,10 +1,16 @@
-# otel-ruby-goodies
+# rails-otel-context
+
+[![CI](https://github.com/last9/rails-otel-context/actions/workflows/ci.yml/badge.svg)](https://github.com/last9/rails-otel-context/actions/workflows/ci.yml)
+[![Gem Version](https://badge.fury.io/rb/rails-otel-context.svg)](https://badge.fury.io/rb/rails-otel-context)
+[![Ruby](https://img.shields.io/badge/ruby-%3E%3D%203.1.0-ruby.svg)](https://www.ruby-lang.org/)
+[![Rails](https://img.shields.io/badge/rails-%3E%3D%207.0-red.svg)](https://rubyonrails.org/)
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 Production-ready OpenTelemetry enhancements for Ruby on Rails applications, maintained by Last9.
 
 ## Overview
 
-`otel-ruby-goodies` extends the default Ruby OpenTelemetry SDK with production-grade observability features specifically designed for Rails applications. While the standard OpenTelemetry instrumentations provide basic database and cache operation tracing, they lack critical debugging context that Rails developers need when investigating slow queries and performance issues in production.
+`rails-otel-context` extends the default Ruby OpenTelemetry SDK with production-grade observability features specifically designed for Rails applications. While the standard OpenTelemetry instrumentations provide basic database and cache operation tracing, they lack critical debugging context that Rails developers need when investigating slow queries and performance issues in production.
 
 This gem adds intelligent span enrichment that captures **exactly where in your Rails application code** slow operations are called—down to the specific controller, model, or service method and line number—making it trivial to jump from a trace in your observability platform directly to the problematic code.
 
@@ -127,13 +133,13 @@ Creates full OpenTelemetry instrumentation for ClickHouse clients (no official i
 Add to your Rails Gemfile:
 
 ```ruby
-gem 'otel-ruby-goodies'
+gem 'rails-otel-context'
 ```
 
 Or for local development/testing:
 
 ```ruby
-gem 'otel-ruby-goodies', path: 'path/to/otel-ruby-goodies'
+gem 'rails-otel-context', path: 'path/to/rails-otel-context'
 ```
 
 Then run:
@@ -150,7 +156,7 @@ The gem automatically integrates via a Railtie—**no manual initialization need
 - Environment variables are read and applied during Rails initialization
 - Works with standard Rails boot process (no special setup required)
 
-Just add the gem and configure OpenTelemetry as usual. `otel-ruby-goodies` will enhance your traces automatically.
+Just add the gem and configure OpenTelemetry as usual. `rails-otel-context` will enhance your traces automatically.
 
 ## Usage
 
@@ -159,8 +165,8 @@ Just add the gem and configure OpenTelemetry as usual. `otel-ruby-goodies` will 
 The gem works out-of-the-box with sensible defaults (200ms slow query threshold). To customize:
 
 ```ruby
-# config/initializers/otel_ruby_goodies.rb (Rails)
-OTelRubyGoodies.configure do |c|
+# config/initializers/rails_otel_context.rb (Rails)
+RailsOtelContext.configure do |c|
   # PostgreSQL slow query tracking
   c.pg_slow_query_enabled = true
   c.pg_slow_query_threshold_ms = 200.0
@@ -178,28 +184,84 @@ OTelRubyGoodies.configure do |c|
 end
 ```
 
+### Custom Span Names with ActiveRecord Context
+
+By default, database spans are named by the underlying instrumentation (e.g., "SELECT postgres.users"). You can customize span names using ActiveRecord context to make traces more readable:
+
+```ruby
+# config/initializers/rails_otel_context.rb
+RailsOtelContext.configure do |c|
+  # Simple formatter: "User.find" instead of "SELECT postgres.users"
+  c.span_name_formatter = lambda do |original_name, ar_context|
+    model = ar_context[:model_name]
+    method = ar_context[:method_name]
+
+    if model && method
+      "#{model}.#{method}"
+    else
+      original_name # fallback to original if no AR context
+    end
+  end
+end
+```
+
+**Benefits:**
+- **Clearer traces**: See "User.find" instead of generic "SELECT postgres.users"
+- **Better grouping**: Group spans by model and method in APM tools
+- **Faster debugging**: Immediately understand what operation caused the query
+
+**Advanced example with operation types:**
+
+```ruby
+c.span_name_formatter = lambda do |original_name, ar_context|
+  model = ar_context[:model_name]
+  method = ar_context[:method_name]
+
+  if model && method
+    operation = case method
+                when /find/, /where/, /select/ then 'SELECT'
+                when /create/, /insert/ then 'INSERT'
+                when /update/, /save/ then 'UPDATE'
+                when /delete/, /destroy/ then 'DELETE'
+                else 'QUERY'
+                end
+    "#{operation} #{model}.#{method}"
+  else
+    original_name
+  end
+end
+```
+
+**Important notes:**
+- The formatter is called only when ActiveRecord context is available
+- Errors in the formatter are caught and logged—they won't break your application
+- The formatter applies to all adapters (PostgreSQL, MySQL, ClickHouse)
+- Redis spans are not renamed (no ActiveRecord context for cache operations)
+
+See [`examples/rails/span_name_formatter_example.rb`](examples/rails/span_name_formatter_example.rb) for more examples.
+
 ### Environment Variable Configuration
 
 All settings can be controlled via environment variables—ideal for container deployments:
 
 ```bash
 # PostgreSQL
-export OTEL_GOODIES_PG_SLOW_QUERY_ENABLED=true
-export OTEL_GOODIES_PG_SLOW_QUERY_MS=200.0
+export RAILS_OTEL_CONTEXT_PG_SLOW_QUERY_ENABLED=true
+export RAILS_OTEL_CONTEXT_PG_SLOW_QUERY_MS=200.0
 
 # Legacy fallback (still supported)
 export OTEL_SLOW_QUERY_MS=200.0
 
 # MySQL
-export OTEL_GOODIES_MYSQL2_SLOW_QUERY_ENABLED=true
-export OTEL_GOODIES_MYSQL2_SLOW_QUERY_MS=200.0
+export RAILS_OTEL_CONTEXT_MYSQL2_SLOW_QUERY_ENABLED=true
+export RAILS_OTEL_CONTEXT_MYSQL2_SLOW_QUERY_MS=200.0
 
 # Redis
-export OTEL_GOODIES_REDIS_SOURCE_ENABLED=false
+export RAILS_OTEL_CONTEXT_REDIS_SOURCE_ENABLED=false
 
 # ClickHouse
-export OTEL_GOODIES_CLICKHOUSE_ENABLED=true
-export OTEL_GOODIES_CLICKHOUSE_SLOW_QUERY_MS=200.0
+export RAILS_OTEL_CONTEXT_CLICKHOUSE_ENABLED=true
+export RAILS_OTEL_CONTEXT_CLICKHOUSE_SLOW_QUERY_MS=200.0
 ```
 
 **Supported boolean values:** `1`, `true`, `yes`, `on` (case-insensitive) → `true` | `0`, `false`, `no`, `off` → `false`
@@ -208,14 +270,14 @@ export OTEL_GOODIES_CLICKHOUSE_SLOW_QUERY_MS=200.0
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `OTEL_GOODIES_PG_SLOW_QUERY_ENABLED` | `true` | Enable/disable PG slow query enrichment |
-| `OTEL_GOODIES_PG_SLOW_QUERY_MS` | `200.0` | PG slow query threshold in milliseconds |
+| `RAILS_OTEL_CONTEXT_PG_SLOW_QUERY_ENABLED` | `true` | Enable/disable PG slow query enrichment |
+| `RAILS_OTEL_CONTEXT_PG_SLOW_QUERY_MS` | `200.0` | PG slow query threshold in milliseconds |
 | `OTEL_SLOW_QUERY_MS` | `200.0` | Legacy fallback for PG threshold |
-| `OTEL_GOODIES_MYSQL2_SLOW_QUERY_ENABLED` | `true` | Enable/disable MySQL2 slow query enrichment |
-| `OTEL_GOODIES_MYSQL2_SLOW_QUERY_MS` | `200.0` | MySQL2 slow query threshold in milliseconds |
-| `OTEL_GOODIES_REDIS_SOURCE_ENABLED` | `false` | Enable/disable Redis source location tracking |
-| `OTEL_GOODIES_CLICKHOUSE_ENABLED` | `true` | Enable/disable ClickHouse instrumentation |
-| `OTEL_GOODIES_CLICKHOUSE_SLOW_QUERY_MS` | `200.0` | ClickHouse slow query threshold in milliseconds |
+| `RAILS_OTEL_CONTEXT_MYSQL2_SLOW_QUERY_ENABLED` | `true` | Enable/disable MySQL2 slow query enrichment |
+| `RAILS_OTEL_CONTEXT_MYSQL2_SLOW_QUERY_MS` | `200.0` | MySQL2 slow query threshold in milliseconds |
+| `RAILS_OTEL_CONTEXT_REDIS_SOURCE_ENABLED` | `false` | Enable/disable Redis source location tracking |
+| `RAILS_OTEL_CONTEXT_CLICKHOUSE_ENABLED` | `true` | Enable/disable ClickHouse instrumentation |
+| `RAILS_OTEL_CONTEXT_CLICKHOUSE_SLOW_QUERY_MS` | `200.0` | ClickHouse slow query threshold in milliseconds |
 
 ## Configuration Best Practices
 
@@ -246,8 +308,8 @@ Redis source tracking is **disabled by default** because:
 Different environments have different performance characteristics:
 
 ```ruby
-# config/initializers/otel_ruby_goodies.rb
-OTelRubyGoodies.configure do |c|
+# config/initializers/rails_otel_context.rb
+RailsOtelContext.configure do |c|
   if Rails.env.production?
     # Tighter thresholds in production
     c.pg_slow_query_threshold_ms = 150.0
@@ -273,7 +335,7 @@ gem 'opentelemetry-exporter-otlp'
 gem 'opentelemetry-instrumentation-rails'
 gem 'opentelemetry-instrumentation-pg'
 gem 'opentelemetry-instrumentation-redis'
-gem 'otel-ruby-goodies'  # 👈 Add this for enhanced tracing
+gem 'rails-otel-context'  # 👈 Add this for enhanced tracing
 ```
 
 ```ruby
@@ -289,8 +351,8 @@ end
 ```
 
 ```ruby
-# config/initializers/otel_ruby_goodies.rb (optional - for custom config)
-OTelRubyGoodies.configure do |c|
+# config/initializers/rails_otel_context.rb (optional - for custom config)
+RailsOtelContext.configure do |c|
   c.pg_slow_query_threshold_ms = 150.0
   c.redis_source_enabled = Rails.env.development?
 end
@@ -301,8 +363,8 @@ That's it! No manual adapter installation needed—Rails handles everything via 
 ### Example 2: Environment-Based Configuration
 
 ```ruby
-# config/initializers/otel_ruby_goodies.rb
-OTelRubyGoodies.configure do |c|
+# config/initializers/rails_otel_context.rb
+RailsOtelContext.configure do |c|
   if Rails.env.production?
     # Strict thresholds in production
     c.pg_slow_query_threshold_ms = 150.0
@@ -332,12 +394,12 @@ environment:
   OTEL_SERVICE_NAME: my-rails-app
   OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
 
-  # otel-ruby-goodies config
-  OTEL_GOODIES_PG_SLOW_QUERY_MS: "150"
-  OTEL_GOODIES_MYSQL2_SLOW_QUERY_MS: "150"
-  OTEL_GOODIES_REDIS_SOURCE_ENABLED: "false"
-  OTEL_GOODIES_CLICKHOUSE_ENABLED: "true"
-  OTEL_GOODIES_CLICKHOUSE_SLOW_QUERY_MS: "200"
+  # rails-otel-context config
+  RAILS_OTEL_CONTEXT_PG_SLOW_QUERY_MS: "150"
+  RAILS_OTEL_CONTEXT_MYSQL2_SLOW_QUERY_MS: "150"
+  RAILS_OTEL_CONTEXT_REDIS_SOURCE_ENABLED: "false"
+  RAILS_OTEL_CONTEXT_CLICKHOUSE_ENABLED: "true"
+  RAILS_OTEL_CONTEXT_CLICKHOUSE_SLOW_QUERY_MS: "200"
 ```
 
 No code changes needed—the gem reads these automatically!
@@ -346,7 +408,7 @@ No code changes needed—the gem reads these automatically!
 
 **Scenario:** A user reports slow page loads on `/products` page.
 
-**Without otel-ruby-goodies:**
+**Without rails-otel-context:**
 ```json
 {
   "span": "SELECT products",
@@ -356,7 +418,7 @@ No code changes needed—the gem reads these automatically!
 ```
 You know there's a slow query, but where is it called from? Time to grep the codebase... 😞
 
-**With rails-otel-goodies:**
+**With rails-otel-context:**
 ```json
 {
   "span": "SELECT products",
@@ -436,7 +498,7 @@ For ClickHouse, we create the span ourselves:
 
 ### Slow PostgreSQL Query in Your Observability Platform
 
-Without `otel-ruby-goodies`:
+Without `rails-otel-context`:
 ```json
 {
   "name": "SELECT products",
@@ -446,7 +508,7 @@ Without `otel-ruby-goodies`:
 }
 ```
 
-With `otel-ruby-goodies`:
+With `rails-otel-context`:
 ```json
 {
   "name": "SELECT products",
@@ -495,13 +557,13 @@ With `otel-ruby-goodies`:
 2. **Verify adapters are installed:**
    ```ruby
    # In Rails console
-   PG::Connection.ancestors.any? { |m| m.to_s.include?('OTelRubyGoodies') }
+   PG::Connection.ancestors.any? { |m| m.to_s.include?('RailsOtelContext') }
    # => Should return true
    ```
 
 3. **Check threshold configuration:**
    ```ruby
-   OTelRubyGoodies.configuration.pg_slow_query_threshold_ms
+   RailsOtelContext.configuration.pg_slow_query_threshold_ms
    # Make sure it's lower than your query duration
    ```
 
@@ -523,7 +585,7 @@ With `otel-ruby-goodies`:
 
 2. **Check if enabled:**
    ```ruby
-   OTelRubyGoodies.configuration.clickhouse_enabled
+   RailsOtelContext.configuration.clickhouse_enabled
    # => Should be true
    ```
 
@@ -605,7 +667,7 @@ We welcome contributions! Areas of interest:
 
 ## License
 
-Apache-2.0 - See LICENSE for details.
+MIT License - See [LICENSE](LICENSE) for details.
 
 ## Maintainers
 
@@ -613,6 +675,6 @@ Maintained with ❤️ by the observability team at [Last9](https://last9.io).
 
 ## Support
 
-- 🐛 **Issues:** [GitHub Issues](https://github.com/last9/otel-ruby-goodies/issues)
-- 💬 **Discussions:** [GitHub Discussions](https://github.com/last9/otel-ruby-goodies/discussions)
+- 🐛 **Issues:** [GitHub Issues](https://github.com/last9/rails-otel-context/issues)
+- 💬 **Discussions:** [GitHub Discussions](https://github.com/last9/rails-otel-context/discussions)
 - 📧 **Email:** engineering@last9.io

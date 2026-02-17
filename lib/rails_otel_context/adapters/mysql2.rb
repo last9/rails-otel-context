@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module RailsOtelGoodies
+module RailsOtelContext
   module Adapters
     module Mysql2
       module_function
@@ -45,7 +45,7 @@ module RailsOtelGoodies
             end
 
             def activerecord_context
-              RailsOtelGoodies::ActiveRecordContext.extract(app_root: app_root)
+              RailsOtelContext::ActiveRecordContext.extract(app_root: app_root)
             end
           end
 
@@ -56,9 +56,19 @@ module RailsOtelGoodies
             result = super(sql, options)
             duration_ms = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - started_at) * 1000.0
 
-            if source && duration_ms >= mod.threshold_ms
-              span = OpenTelemetry::Trace.current_span
-              if span.context.valid?
+            span = OpenTelemetry::Trace.current_span
+            if span.context.valid?
+              # Rename span if formatter is configured and AR context is available
+              if ar_context && RailsOtelContext.configuration.span_name_formatter
+                begin
+                  new_name = RailsOtelContext.configuration.span_name_formatter.call(span.name, ar_context)
+                  span.update_name(new_name) if new_name && new_name != span.name
+                rescue StandardError => e
+                  warn "[RailsOtelContext] Span name formatter error: #{e.message}"
+                end
+              end
+
+              if source && duration_ms >= mod.threshold_ms
                 span.set_attribute('code.filepath', source[0])
                 span.set_attribute('code.lineno', source[1])
                 span.set_attribute('db.query.duration_ms', duration_ms.round(1))
@@ -82,9 +92,19 @@ module RailsOtelGoodies
             result = super(sql)
             duration_ms = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - started_at) * 1000.0
 
-            if source && duration_ms >= mod.threshold_ms
-              span = OpenTelemetry::Trace.current_span
-              if span.context.valid?
+            span = OpenTelemetry::Trace.current_span
+            if span.context.valid?
+              # Rename span if formatter is configured and AR context is available
+              if ar_context && RailsOtelContext.configuration.span_name_formatter
+                begin
+                  new_name = RailsOtelContext.configuration.span_name_formatter.call(span.name, ar_context)
+                  span.update_name(new_name) if new_name && new_name != span.name
+                rescue StandardError => e
+                  warn "[RailsOtelContext] Span name formatter error: #{e.message}"
+                end
+              end
+
+              if source && duration_ms >= mod.threshold_ms
                 span.set_attribute('code.filepath', source[0])
                 span.set_attribute('code.lineno', source[1])
                 span.set_attribute('db.query.duration_ms', duration_ms.round(1))
@@ -101,6 +121,8 @@ module RailsOtelGoodies
             result
           end
         end
+
+        mod
       end
       private_class_method :build_patch_module
     end

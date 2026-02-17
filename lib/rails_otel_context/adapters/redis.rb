@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module RailsOtelGoodies
+module RailsOtelContext
   module Adapters
     module Redis
       module_function
@@ -22,7 +22,7 @@ module RailsOtelGoodies
       end
 
       def build_patch_module
-        Module.new do
+        mod = Module.new do
           class << self
             attr_accessor :app_root
 
@@ -69,6 +69,8 @@ module RailsOtelGoodies
             end
           end
         end
+
+        mod
       end
       private_class_method :build_patch_module
     end

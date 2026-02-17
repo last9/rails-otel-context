@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Test Ruby ${{ matrix.ruby }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        ruby: ['3.1', '3.2', '3.3']
+        os: [ubuntu-latest]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Ruby ${{ matrix.ruby }}
+      uses: ruby/setup-ruby@v1
+      with:
+        ruby-version: ${{ matrix.ruby }}
+        bundler-cache: false
+
+    - name: Install dependencies
+      run: |
+        gem install bundler
+        bundle install --jobs 4 --retry 3
+
+    - name: Run tests
+      run: |
+        ruby -Ilib:test test/pg_adapter_test.rb
+        ruby -Ilib:test test/mysql2_adapter_test.rb
+        ruby -Ilib:test test/redis_adapter_test.rb
+        ruby -Ilib:test test/clickhouse_adapter_test.rb
+        ruby -Ilib:test test/configuration_test.rb
+        ruby -Ilib:test test/activerecord_context_test.rb
+      env:
+        RAILS_OTEL_CONTEXT_TEST: 'true'
+
+  rubocop:
+    name: RuboCop
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Ruby
+      uses: ruby/setup-ruby@v1
+      with:
+        ruby-version: '3.3'
+        bundler-cache: false
+
+    - name: Install dependencies
+      run: |
+        gem install bundler rubocop
+        bundle install --jobs 4 --retry 3
+
+    - name: Run RuboCop
+      run: rubocop lib/ test/ --format progress
+
+  build:
+    name: Build Gem
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Ruby
+      uses: ruby/setup-ruby@v1
+      with:
+        ruby-version: '3.3'
+        bundler-cache: false
+
+    - name: Install dependencies
+      run: gem install bundler
+
+    - name: Build gem
+      run: gem build rails-otel-context.gemspec
+
+    - name: List gem contents
+      run: gem specification rails-otel-context-*.gem
+
+    - name: Upload gem artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: rails-otel-context-gem
+        path: rails-otel-context-*.gem
+        retention-days: 7

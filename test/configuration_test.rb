@@ -6,20 +6,20 @@ class ConfigurationTest < Minitest::Test
   include EnvHelpers
 
   def setup
-    RailsOtelGoodies.reset_configuration!
+    RailsOtelContext.reset_configuration!
   end
 
   def test_apply_env_configuration
     with_env(
-      'RAILS_OTEL_GOODIES_PG_SLOW_QUERY_ENABLED' => 'false',
-      'RAILS_OTEL_GOODIES_PG_SLOW_QUERY_MS' => '450.5',
-      'RAILS_OTEL_GOODIES_MYSQL2_SLOW_QUERY_ENABLED' => 'true',
-      'RAILS_OTEL_GOODIES_MYSQL2_SLOW_QUERY_MS' => '600',
-      'RAILS_OTEL_GOODIES_REDIS_SOURCE_ENABLED' => 'true',
-      'RAILS_OTEL_GOODIES_CLICKHOUSE_ENABLED' => 'false',
-      'RAILS_OTEL_GOODIES_CLICKHOUSE_SLOW_QUERY_MS' => '700'
+      'RAILS_OTEL_CONTEXT_PG_SLOW_QUERY_ENABLED' => 'false',
+      'RAILS_OTEL_CONTEXT_PG_SLOW_QUERY_MS' => '450.5',
+      'RAILS_OTEL_CONTEXT_MYSQL2_SLOW_QUERY_ENABLED' => 'true',
+      'RAILS_OTEL_CONTEXT_MYSQL2_SLOW_QUERY_MS' => '600',
+      'RAILS_OTEL_CONTEXT_REDIS_SOURCE_ENABLED' => 'true',
+      'RAILS_OTEL_CONTEXT_CLICKHOUSE_ENABLED' => 'false',
+      'RAILS_OTEL_CONTEXT_CLICKHOUSE_SLOW_QUERY_MS' => '700'
     ) do
-      config = RailsOtelGoodies.apply_env_configuration!
+      config = RailsOtelContext.apply_env_configuration!
 
       assert_equal false, config.pg_slow_query_enabled
       assert_equal 450.5, config.pg_slow_query_threshold_ms
@@ -33,20 +33,20 @@ class ConfigurationTest < Minitest::Test
 
   def test_legacy_slow_query_env_is_supported_for_pg
     with_env(
-      'RAILS_OTEL_GOODIES_PG_SLOW_QUERY_MS' => nil,
+      'RAILS_OTEL_CONTEXT_PG_SLOW_QUERY_MS' => nil,
       'OTEL_SLOW_QUERY_MS' => '275'
     ) do
-      config = RailsOtelGoodies.apply_env_configuration!
+      config = RailsOtelContext.apply_env_configuration!
       assert_equal 275.0, config.pg_slow_query_threshold_ms
     end
   end
 
   def test_invalid_values_fall_back_to_defaults
     with_env(
-      'RAILS_OTEL_GOODIES_PG_SLOW_QUERY_ENABLED' => 'invalid',
-      'RAILS_OTEL_GOODIES_PG_SLOW_QUERY_MS' => 'bad-number'
+      'RAILS_OTEL_CONTEXT_PG_SLOW_QUERY_ENABLED' => 'invalid',
+      'RAILS_OTEL_CONTEXT_PG_SLOW_QUERY_MS' => 'bad-number'
     ) do
-      config = RailsOtelGoodies.apply_env_configuration!
+      config = RailsOtelContext.apply_env_configuration!
       assert_equal true, config.pg_slow_query_enabled
       assert_equal 200.0, config.pg_slow_query_threshold_ms
       assert_equal true, config.mysql2_slow_query_enabled

@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module RailsOtelGoodies
+module RailsOtelContext
   module ActiveRecordContext
     module_function
 

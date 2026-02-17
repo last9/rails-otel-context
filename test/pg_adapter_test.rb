@@ -7,11 +7,11 @@ class PgAdapterTest < Minitest::Test
   include SpanHelpers
 
   def setup
-    RailsOtelGoodies::Adapters::PG.instance_variable_set(:@patch_module, nil)
+    RailsOtelContext::Adapters::PG.instance_variable_set(:@patch_module, nil)
   end
 
   def test_patch_sets_code_location_attributes_for_slow_queries
-    patch = RailsOtelGoodies::Adapters::PG.send(:build_patch_module, [:exec])
+    patch = RailsOtelContext::Adapters::PG.send(:build_patch_module, [:exec])
     patch.configure(app_root: Dir.pwd, threshold_ms: 0.0)
 
     host_class = new_host_class
@@ -30,7 +30,7 @@ class PgAdapterTest < Minitest::Test
   end
 
   def test_patch_skips_attributes_for_fast_queries
-    patch = RailsOtelGoodies::Adapters::PG.send(:build_patch_module, [:exec])
+    patch = RailsOtelContext::Adapters::PG.send(:build_patch_module, [:exec])
     patch.configure(app_root: Dir.pwd, threshold_ms: 999_999.0)
 
     host_class = new_host_class
@@ -64,7 +64,7 @@ class PgAdapterTest < Minitest::Test
 
     if had_original
       thread_singleton.class_eval do
-        alias_method :__otel_goodies_original_each_caller_location, :each_caller_location
+        alias_method :__rails_otel_context_original_each_caller_location, :each_caller_location
       end
     end
     thread_singleton.define_method(:each_caller_location) { |&block| block.call(location) }
@@ -73,8 +73,8 @@ class PgAdapterTest < Minitest::Test
   ensure
     if had_original
       thread_singleton.class_eval do
-        alias_method :each_caller_location, :__otel_goodies_original_each_caller_location
-        remove_method :__otel_goodies_original_each_caller_location
+        alias_method :each_caller_location, :__rails_otel_context_original_each_caller_location
+        remove_method :__rails_otel_context_original_each_caller_location
       end
     else
       thread_singleton.class_eval { remove_method :each_caller_location }

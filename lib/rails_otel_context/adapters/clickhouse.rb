@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module RailsOtelGoodies
+module RailsOtelContext
   module Adapters
     module Clickhouse
       module_function
@@ -43,7 +43,7 @@ module RailsOtelGoodies
       end
 
       def build_patch_module(methods)
-        Module.new do
+        mod = Module.new do
           class << self
             attr_accessor :app_root, :threshold_ms
 
@@ -65,26 +65,41 @@ module RailsOtelGoodies
 
               nil
             end
+
+            def activerecord_context
+              RailsOtelContext::ActiveRecordContext.extract(app_root: app_root)
+            end
           end
 
           methods.each do |method_name|
             define_method(method_name) do |*args, &block|
-              if Thread.current[:otel_goodies_clickhouse_instrumenting]
+              if Thread.current[:rails_otel_context_clickhouse_instrumenting]
                 return super(*args, &block)
               end
 
               source = mod.source_location_for_app
+              ar_context = mod.activerecord_context
               started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
               operation = method_name.to_s.upcase
               statement = args.first.is_a?(String) ? args.first : nil
 
-              tracer = OpenTelemetry.tracer_provider.tracer('otel-ruby-goodies-clickhouse')
-              Thread.current[:otel_goodies_clickhouse_instrumenting] = true
+              tracer = OpenTelemetry.tracer_provider.tracer('rails-otel-context-clickhouse')
+              Thread.current[:rails_otel_context_clickhouse_instrumenting] = true
 
               tracer.in_span("#{operation} clickhouse", kind: :client) do |span|
                 span.set_attribute('db.system', 'clickhouse')
                 span.set_attribute('db.operation', operation)
                 span.set_attribute('db.statement', statement) if statement
+
+                # Rename span if formatter is configured and AR context is available
+                if ar_context && RailsOtelContext.configuration.span_name_formatter
+                  begin
+                    new_name = RailsOtelContext.configuration.span_name_formatter.call(span.name, ar_context)
+                    span.update_name(new_name) if new_name && new_name != span.name
+                  rescue StandardError => e
+                    warn "[RailsOtelContext] Span name formatter error: #{e.message}"
+                  end
+                end
 
                 result = super(*args, &block)
                 duration_ms = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - started_at) * 1000.0
@@ -96,13 +111,21 @@ module RailsOtelGoodies
                   span.set_attribute('db.query.slow_threshold_ms', mod.threshold_ms)
                 end
 
+                # Add ActiveRecord context if available
+                if ar_context
+                  span.set_attribute('code.activerecord.model', ar_context[:model_name]) if ar_context[:model_name]
+                  span.set_attribute('code.activerecord.method', ar_context[:method_name]) if ar_context[:method_name]
+                end
+
                 result
               end
             ensure
-              Thread.current[:otel_goodies_clickhouse_instrumenting] = false
+              Thread.current[:rails_otel_context_clickhouse_instrumenting] = false
             end
           end
         end
+
+        mod
       end
       private_class_method :build_patch_module
     end

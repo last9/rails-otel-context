@@ -15,7 +15,7 @@ class ActiveRecordContextTest < Minitest::Test
     # Temporarily remove ActiveRecord
     ar_backup = Object.send(:remove_const, :ActiveRecord) if defined?(::ActiveRecord)
 
-    context = RailsOtelGoodies::ActiveRecordContext.extract(app_root: '/app')
+    context = RailsOtelContext::ActiveRecordContext.extract(app_root: '/app')
     assert_nil context
   ensure
     Object.const_set(:ActiveRecord, ar_backup) if ar_backup
@@ -27,7 +27,7 @@ class ActiveRecordContextTest < Minitest::Test
       method == :each_caller_location ? false : original_method.call(method)
     end
 
-    context = RailsOtelGoodies::ActiveRecordContext.extract(app_root: '/app')
+    context = RailsOtelContext::ActiveRecordContext.extract(app_root: '/app')
     assert_nil context
   ensure
     Thread.singleton_class.send(:remove_method, :respond_to?)
@@ -40,7 +40,7 @@ class ActiveRecordContextTest < Minitest::Test
     Object.const_set(:User, user_class)
 
     with_mock_caller_location('User.find', '/app/controllers/users_controller.rb', 10) do
-      context = RailsOtelGoodies::ActiveRecordContext.extract(app_root: '/app')
+      context = RailsOtelContext::ActiveRecordContext.extract(app_root: '/app')
 
       assert_equal 'User', context[:model_name]
       assert_equal 'find', context[:method_name]
@@ -55,7 +55,7 @@ class ActiveRecordContextTest < Minitest::Test
     Object.const_set(:Product, product_class)
 
     with_mock_caller_location('Product#save', '/app/models/product.rb', 25) do
-      context = RailsOtelGoodies::ActiveRecordContext.extract(app_root: '/app')
+      context = RailsOtelContext::ActiveRecordContext.extract(app_root: '/app')
 
       assert_equal 'Product', context[:model_name]
       assert_equal 'save', context[:method_name]
@@ -70,7 +70,7 @@ class ActiveRecordContextTest < Minitest::Test
     Object.const_set(:Order, order_class)
 
     with_mock_caller_location('some_method', '/app/models/order.rb', 15) do
-      context = RailsOtelGoodies::ActiveRecordContext.extract(app_root: '/app')
+      context = RailsOtelContext::ActiveRecordContext.extract(app_root: '/app')
 
       assert_equal 'Order', context[:model_name]
     end
@@ -83,7 +83,7 @@ class ActiveRecordContextTest < Minitest::Test
     Object.const_set(:RegularClass, Class.new)
 
     with_mock_caller_location('RegularClass.method', '/app/lib/regular.rb', 5) do
-      context = RailsOtelGoodies::ActiveRecordContext.extract(app_root: '/app')
+      context = RailsOtelContext::ActiveRecordContext.extract(app_root: '/app')
 
       assert_nil context
     end
@@ -93,7 +93,7 @@ class ActiveRecordContextTest < Minitest::Test
 
   def test_extract_handles_nameerror_gracefully
     with_mock_caller_location('NonExistent.find', '/app/controllers/some_controller.rb', 20) do
-      context = RailsOtelGoodies::ActiveRecordContext.extract(app_root: '/app')
+      context = RailsOtelContext::ActiveRecordContext.extract(app_root: '/app')
 
       assert_nil context
     end

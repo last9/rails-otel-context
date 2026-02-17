@@ -5,10 +5,10 @@ require 'opentelemetry-api'
 require 'logger'
 
 # Allow tests to run without Rails
-ENV['RAILS_OTEL_GOODIES_TEST'] = 'true'
+ENV['RAILS_OTEL_CONTEXT_TEST'] = 'true'
 
 $LOAD_PATH.unshift(File.expand_path('../lib', __dir__))
-require 'rails_otel_goodies'
+require 'rails_otel_context'
 
 class FakeSpan
   attr_reader :attributes
@@ -42,15 +42,15 @@ module SpanHelpers
   def with_current_span(fake_span = FakeSpan.new)
     singleton = OpenTelemetry::Trace.singleton_class
     singleton.class_eval do
-      alias_method :__otel_goodies_original_current_span, :current_span
+      alias_method :__rails_otel_context_original_current_span, :current_span
       define_method(:current_span) { fake_span }
     end
 
     yield fake_span
   ensure
     singleton.class_eval do
-      alias_method :current_span, :__otel_goodies_original_current_span
-      remove_method :__otel_goodies_original_current_span
+      alias_method :current_span, :__rails_otel_context_original_current_span
+      remove_method :__rails_otel_context_original_current_span
     end
   end
 end

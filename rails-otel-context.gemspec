@@ -1,17 +1,17 @@
 # frozen_string_literal: true
 
-require_relative 'lib/rails_otel_goodies/version'
+require_relative 'lib/rails_otel_context/version'
 
 Gem::Specification.new do |spec|
-  spec.name = 'rails-otel-goodies'
-  spec.version = RailsOtelGoodies::VERSION
+  spec.name = 'rails-otel-context'
+  spec.version = RailsOtelContext::VERSION
   spec.authors = ['Last9']
   spec.email = ['engineering@last9.io']
 
   spec.summary = 'Production helpers for OpenTelemetry Ruby instrumentations in Rails.'
   spec.description = 'Rails-specific OpenTelemetry enhancements for source location tracking and database instrumentation. Maintained by Last9.'
-  spec.homepage = 'https://github.com/last9/rails-otel-goodies'
-  spec.license = 'Apache-2.0'
+  spec.homepage = 'https://github.com/last9/rails-otel-context'
+  spec.license = 'MIT'
   spec.required_ruby_version = '>= 3.1.0'
 
   spec.files = Dir.chdir(__dir__) do

@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module RailsOtelGoodies
+module RailsOtelContext
   class Configuration
     attr_accessor :pg_slow_query_enabled,
                   :pg_slow_query_threshold_ms,
@@ -8,7 +8,8 @@ module RailsOtelGoodies
                   :mysql2_slow_query_threshold_ms,
                   :redis_source_enabled,
                   :clickhouse_enabled,
-                  :clickhouse_slow_query_threshold_ms
+                  :clickhouse_slow_query_threshold_ms,
+                  :span_name_formatter
 
     def initialize
       @pg_slow_query_enabled = true
@@ -18,6 +19,7 @@ module RailsOtelGoodies
       @redis_source_enabled = false
       @clickhouse_enabled = true
       @clickhouse_slow_query_threshold_ms = 200.0
+      @span_name_formatter = nil
     end
   end
 end

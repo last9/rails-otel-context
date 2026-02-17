@@ -1,11 +1,11 @@
 # frozen_string_literal: true
 
-# config/initializers/otel_ruby_goodies.rb
+# config/initializers/rails_otel_context.rb
 #
-# Configuration example for otel-ruby-goodies in a Rails application.
+# Configuration example for rails-otel-context in a Rails application.
 # This file should be placed in config/initializers/ directory.
 
-RailsOtelGoodies.configure do |c|
+RailsOtelContext.configure do |c|
   # ============================================================================
   # PostgreSQL Configuration
   # ============================================================================
@@ -53,21 +53,21 @@ end
 
 # Example 1: Different thresholds per environment
 if Rails.env.production?
-  RailsOtelGoodies.configure do |c|
+  RailsOtelContext.configure do |c|
     # Stricter thresholds in production to catch real issues
     c.pg_slow_query_threshold_ms = 150.0
     c.mysql2_slow_query_threshold_ms = 150.0
     c.redis_source_enabled = false  # Too noisy in production
   end
 elsif Rails.env.development?
-  RailsOtelGoodies.configure do |c|
+  RailsOtelContext.configure do |c|
     # Lower thresholds in development to catch issues early
     c.pg_slow_query_threshold_ms = 50.0
     c.mysql2_slow_query_threshold_ms = 50.0
     c.redis_source_enabled = true  # Helpful for debugging
   end
 elsif Rails.env.test?
-  RailsOtelGoodies.configure do |c|
+  RailsOtelContext.configure do |c|
     # Disable in test to avoid test pollution
     c.pg_slow_query_enabled = false
     c.mysql2_slow_query_enabled = false
@@ -79,10 +79,10 @@ end
 # Example 2: Using environment variables (recommended for container deployments)
 # You can skip the Ruby configuration entirely and use ENV vars:
 #
-# RAILS_OTEL_GOODIES_PG_SLOW_QUERY_ENABLED=true
-# RAILS_OTEL_GOODIES_PG_SLOW_QUERY_MS=200.0
-# RAILS_OTEL_GOODIES_MYSQL2_SLOW_QUERY_ENABLED=true
-# RAILS_OTEL_GOODIES_MYSQL2_SLOW_QUERY_MS=200.0
-# RAILS_OTEL_GOODIES_REDIS_SOURCE_ENABLED=false
-# RAILS_OTEL_GOODIES_CLICKHOUSE_ENABLED=true
-# RAILS_OTEL_GOODIES_CLICKHOUSE_SLOW_QUERY_MS=200.0
+# RAILS_OTEL_CONTEXT_PG_SLOW_QUERY_ENABLED=true
+# RAILS_OTEL_CONTEXT_PG_SLOW_QUERY_MS=200.0
+# RAILS_OTEL_CONTEXT_MYSQL2_SLOW_QUERY_ENABLED=true
+# RAILS_OTEL_CONTEXT_MYSQL2_SLOW_QUERY_MS=200.0
+# RAILS_OTEL_CONTEXT_REDIS_SOURCE_ENABLED=false
+# RAILS_OTEL_CONTEXT_CLICKHOUSE_ENABLED=true
+# RAILS_OTEL_CONTEXT_CLICKHOUSE_SLOW_QUERY_MS=200.0

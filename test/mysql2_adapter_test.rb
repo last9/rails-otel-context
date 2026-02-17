@@ -9,11 +9,11 @@ class Mysql2AdapterTest < Minitest::Test
   ValidContext = Struct.new(:valid?)
 
   def setup
-    RailsOtelGoodies::Adapters::Mysql2.instance_variable_set(:@patch_module, nil)
+    RailsOtelContext::Adapters::Mysql2.instance_variable_set(:@patch_module, nil)
   end
 
   def test_query_sets_source_attributes_for_slow_queries
-    patch = RailsOtelGoodies::Adapters::Mysql2.send(:build_patch_module)
+    patch = RailsOtelContext::Adapters::Mysql2.send(:build_patch_module)
     patch.configure(app_root: Dir.pwd, threshold_ms: 0.0)
 
     client_class = new_client_class
@@ -33,7 +33,7 @@ class Mysql2AdapterTest < Minitest::Test
   end
 
   def test_prepare_sets_source_attributes_for_slow_queries
-    patch = RailsOtelGoodies::Adapters::Mysql2.send(:build_patch_module)
+    patch = RailsOtelContext::Adapters::Mysql2.send(:build_patch_module)
     patch.configure(app_root: Dir.pwd, threshold_ms: 0.0)
 
     client_class = new_client_class
@@ -51,7 +51,7 @@ class Mysql2AdapterTest < Minitest::Test
   end
 
   def test_query_skips_attributes_for_fast_queries
-    patch = RailsOtelGoodies::Adapters::Mysql2.send(:build_patch_module)
+    patch = RailsOtelContext::Adapters::Mysql2.send(:build_patch_module)
     patch.configure(app_root: Dir.pwd, threshold_ms: 999_999.0)
 
     client_class = new_client_class
@@ -88,7 +88,7 @@ class Mysql2AdapterTest < Minitest::Test
 
     if had_original
       thread_singleton.class_eval do
-        alias_method :__otel_goodies_original_each_caller_location, :each_caller_location
+        alias_method :__rails_otel_context_original_each_caller_location, :each_caller_location
       end
     end
     thread_singleton.define_method(:each_caller_location) { |&block| block.call(location) }
@@ -97,8 +97,8 @@ class Mysql2AdapterTest < Minitest::Test
   ensure
     if had_original
       thread_singleton.class_eval do
-        alias_method :each_caller_location, :__otel_goodies_original_each_caller_location
-        remove_method :__otel_goodies_original_each_caller_location
+        alias_method :each_caller_location, :__rails_otel_context_original_each_caller_location
+        remove_method :__rails_otel_context_original_each_caller_location
       end
     else
       thread_singleton.class_eval { remove_method :each_caller_location }
@@ -111,15 +111,15 @@ class Mysql2AdapterTest < Minitest::Test
 
     singleton = OpenTelemetry::Trace.singleton_class
     singleton.class_eval do
-      alias_method :__otel_goodies_original_current_span, :current_span
+      alias_method :__rails_otel_context_original_current_span, :current_span
       define_method(:current_span) { fake_span }
     end
 
     yield fake_span
   ensure
     singleton.class_eval do
-      alias_method :current_span, :__otel_goodies_original_current_span
-      remove_method :__otel_goodies_original_current_span
+      alias_method :current_span, :__rails_otel_context_original_current_span
+      remove_method :__rails_otel_context_original_current_span
     end
   end
 end

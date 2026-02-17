@@ -5,23 +5,23 @@ require 'rails'
 require 'rails/application'
 require 'fileutils'
 require 'tmpdir'
-require 'rails_otel_goodies/railtie'
+require 'rails_otel_context/railtie'
 
 class RailtieTest < Minitest::Test
   include EnvHelpers
 
   def setup
-    RailsOtelGoodies.reset_configuration!
+    RailsOtelContext.reset_configuration!
   end
 
   def test_railtie_applies_env_and_installs_adapters_on_active_record_load
-    app_root = Dir.mktmpdir('otel_goodies_dummy_app')
+    app_root = Dir.mktmpdir('rails_otel_context_dummy_app')
     FileUtils.mkdir_p(File.join(app_root, 'config'))
 
     install_calls = []
-    adapters_singleton = RailsOtelGoodies::Adapters.singleton_class
+    adapters_singleton = RailsOtelContext::Adapters.singleton_class
     adapters_singleton.class_eval do
-      alias_method :__otel_goodies_original_install, :install!
+      alias_method :__rails_otel_context_original_install, :install!
       define_method(:install!) do |app_root:, config:|
         install_calls << {
           app_root: app_root.to_s,
@@ -40,8 +40,8 @@ class RailtieTest < Minitest::Test
     end
 
     with_env(
-      'RAILS_OTEL_GOODIES_PG_SLOW_QUERY_ENABLED' => 'true',
-      'RAILS_OTEL_GOODIES_PG_SLOW_QUERY_MS' => '321.0'
+      'RAILS_OTEL_CONTEXT_PG_SLOW_QUERY_ENABLED' => 'true',
+      'RAILS_OTEL_CONTEXT_PG_SLOW_QUERY_MS' => '321.0'
     ) do
       app = app_class.instance
       app.initialize!
@@ -54,8 +54,8 @@ class RailtieTest < Minitest::Test
     assert_equal 321.0, install_calls[0][:pg_threshold]
   ensure
     adapters_singleton.class_eval do
-      alias_method :install!, :__otel_goodies_original_install
-      remove_method :__otel_goodies_original_install
+      alias_method :install!, :__rails_otel_context_original_install
+      remove_method :__rails_otel_context_original_install
     end
     FileUtils.remove_entry(app_root) if app_root && Dir.exist?(app_root)
   end

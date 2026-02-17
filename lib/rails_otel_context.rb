@@ -1,18 +1,18 @@
 # frozen_string_literal: true
 
-# rails-otel-goodies is a Rails-specific gem
+# rails-otel-context is a Rails-specific gem
 # Skip Rails check in test environment to allow unit testing
-unless defined?(Rails) || ENV['RAILS_OTEL_GOODIES_TEST']
-  raise LoadError, 'rails-otel-goodies requires Rails. This gem is designed for Rails applications only.'
+unless defined?(Rails) || ENV['RAILS_OTEL_CONTEXT_TEST']
+  raise LoadError, 'rails-otel-context requires Rails. This gem is designed for Rails applications only.'
 end
 
-require 'rails_otel_goodies/version'
-require 'rails_otel_goodies/configuration'
-require 'rails_otel_goodies/activerecord_context'
-require 'rails_otel_goodies/adapters'
-require 'rails_otel_goodies/railtie' if defined?(Rails::Railtie)
+require 'rails_otel_context/version'
+require 'rails_otel_context/configuration'
+require 'rails_otel_context/activerecord_context'
+require 'rails_otel_context/adapters'
+require 'rails_otel_context/railtie' if defined?(Rails::Railtie)
 
-module RailsOtelGoodies
+module RailsOtelContext
   class << self
     def configuration
       @configuration ||= Configuration.new
@@ -28,22 +28,22 @@ module RailsOtelGoodies
 
     def apply_env_configuration!(config = configuration)
       config.pg_slow_query_enabled =
-        bool_env('RAILS_OTEL_GOODIES_PG_SLOW_QUERY_ENABLED', config.pg_slow_query_enabled)
+        bool_env('RAILS_OTEL_CONTEXT_PG_SLOW_QUERY_ENABLED', config.pg_slow_query_enabled)
       config.pg_slow_query_threshold_ms =
-        float_env('RAILS_OTEL_GOODIES_PG_SLOW_QUERY_MS',
+        float_env('RAILS_OTEL_CONTEXT_PG_SLOW_QUERY_MS',
                   float_env('OTEL_SLOW_QUERY_MS', config.pg_slow_query_threshold_ms))
 
       config.mysql2_slow_query_enabled =
-        bool_env('RAILS_OTEL_GOODIES_MYSQL2_SLOW_QUERY_ENABLED', config.mysql2_slow_query_enabled)
+        bool_env('RAILS_OTEL_CONTEXT_MYSQL2_SLOW_QUERY_ENABLED', config.mysql2_slow_query_enabled)
       config.mysql2_slow_query_threshold_ms =
-        float_env('RAILS_OTEL_GOODIES_MYSQL2_SLOW_QUERY_MS', config.mysql2_slow_query_threshold_ms)
+        float_env('RAILS_OTEL_CONTEXT_MYSQL2_SLOW_QUERY_MS', config.mysql2_slow_query_threshold_ms)
 
       config.redis_source_enabled =
-        bool_env('RAILS_OTEL_GOODIES_REDIS_SOURCE_ENABLED', config.redis_source_enabled)
+        bool_env('RAILS_OTEL_CONTEXT_REDIS_SOURCE_ENABLED', config.redis_source_enabled)
       config.clickhouse_enabled =
-        bool_env('RAILS_OTEL_GOODIES_CLICKHOUSE_ENABLED', config.clickhouse_enabled)
+        bool_env('RAILS_OTEL_CONTEXT_CLICKHOUSE_ENABLED', config.clickhouse_enabled)
       config.clickhouse_slow_query_threshold_ms =
-        float_env('RAILS_OTEL_GOODIES_CLICKHOUSE_SLOW_QUERY_MS', config.clickhouse_slow_query_threshold_ms)
+        float_env('RAILS_OTEL_CONTEXT_CLICKHOUSE_SLOW_QUERY_MS', config.clickhouse_slow_query_threshold_ms)
 
       config
     end

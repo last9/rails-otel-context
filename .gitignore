@@ -1,0 +1,56 @@
+# Ruby
+*.gem
+*.rbc
+/.config
+/coverage/
+/InstalledFiles
+/pkg/
+/spec/reports/
+/spec/examples.txt
+/test/tmp/
+/test/version_tmp/
+/tmp/
+
+# Environment normalization
+/.bundle/
+/vendor/bundle
+/lib/bundler/man/
+
+# Documentation
+/.yardoc
+/_yardoc
+/doc/
+/rdoc
+
+# Development
+/.rake_tasks
+/.byebug_history
+.ruby-version
+.ruby-gemset
+
+# RVM / rbenv
+.rvmrc
+.ruby-version
+
+# IDE files
+.idea/
+*.swp
+*.swo
+*~
+.vscode/
+.DS_Store
+
+# Gem
+Gemfile.lock
+
+# Logs
+*.log
+
+# Temporary files
+.env
+.env.local
+.env.*.local
+
+# Claude Code
+.claude/settings.local.json
+.claude/settings.json

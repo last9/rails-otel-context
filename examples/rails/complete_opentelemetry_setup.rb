@@ -2,7 +2,7 @@
 
 # config/initializers/opentelemetry.rb
 #
-# Complete OpenTelemetry setup for Rails with otel-ruby-goodies
+# Complete OpenTelemetry setup for Rails with rails-otel-context
 
 require 'opentelemetry/sdk'
 require 'opentelemetry/exporter/otlp'
@@ -38,16 +38,16 @@ OpenTelemetry::SDK.configure do |c|
   )
 end
 
-# Configure otel-ruby-goodies (this happens automatically via Railtie)
+# Configure rails-otel-context (this happens automatically via Railtie)
 # But you can customize it here if needed:
-RailsOtelGoodies.configure do |c|
+RailsOtelContext.configure do |c|
   c.pg_slow_query_threshold_ms = ENV.fetch('SLOW_QUERY_THRESHOLD_MS', 200.0).to_f
   c.mysql2_slow_query_threshold_ms = ENV.fetch('SLOW_QUERY_THRESHOLD_MS', 200.0).to_f
   c.clickhouse_slow_query_threshold_ms = ENV.fetch('SLOW_QUERY_THRESHOLD_MS', 200.0).to_f
 
   # Redis tracking is opt-in
-  c.redis_source_enabled = ENV.fetch('RAILS_OTEL_GOODIES_REDIS_SOURCE_ENABLED', 'false') == 'true'
+  c.redis_source_enabled = ENV.fetch('RAILS_OTEL_CONTEXT_REDIS_SOURCE_ENABLED', 'false') == 'true'
 end
 
-# Note: otel-ruby-goodies adapters are automatically installed via the Railtie
+# Note: rails-otel-context adapters are automatically installed via the Railtie
 # when ActiveRecord loads. No manual installation needed!

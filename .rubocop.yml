@@ -5,42 +5,62 @@ AllCops:
     - 'examples/**/*'
     - 'test/run.rb'
 
-# Allow longer methods for adapters (they're dynamically generated)
+# Allow longer methods for adapters (they're dynamically generated) and tests
 Metrics/MethodLength:
   Max: 30
   Exclude:
-    - 'lib/rails_otel_goodies/adapters/**/*'
-    - 'lib/rails_otel_goodies/activerecord_context.rb'
+    - 'lib/rails_otel_context/adapters/**/*'
+    - 'lib/rails_otel_context/activerecord_context.rb'
+    - 'test/**/*'
 
-# Allow higher complexity for adapters
+# Allow higher complexity for adapters and tests
 Metrics/AbcSize:
   Max: 25
   Exclude:
-    - 'lib/rails_otel_goodies/adapters/**/*'
-    - 'lib/rails_otel_goodies/activerecord_context.rb'
+    - 'lib/rails_otel_context/adapters/**/*'
+    - 'lib/rails_otel_context/activerecord_context.rb'
+    - 'test/**/*'
 
 Metrics/CyclomaticComplexity:
   Max: 10
   Exclude:
-    - 'lib/rails_otel_goodies/activerecord_context.rb'
+    - 'lib/rails_otel_context/adapters/**/*'
+    - 'lib/rails_otel_context/activerecord_context.rb'
 
 Metrics/PerceivedComplexity:
   Max: 10
   Exclude:
-    - 'lib/rails_otel_goodies/activerecord_context.rb'
+    - 'lib/rails_otel_context/adapters/**/*'
+    - 'lib/rails_otel_context/activerecord_context.rb'
 
-# Longer blocks are OK for test setup
+# Longer blocks are OK for test setup and dynamic code generation
 Metrics/BlockLength:
   Exclude:
     - 'test/**/*'
-    - 'lib/rails_otel_goodies/adapters/**/*'
+    - 'lib/rails_otel_context/adapters/**/*'
+    - 'lib/rails_otel_context/activerecord_context.rb'
 
 Metrics/ClassLength:
   Max: 150
 
+# Tests can have higher complexity for thorough test coverage
+Lint/EnsureReturn:
+  Exclude:
+    - 'test/**/*'
+
+# OpenStruct is acceptable in tests for mocking
+Style/OpenStructUse:
+  Exclude:
+    - 'test/**/*'
+
 # Don't require documentation for every class (we have comprehensive README)
 Style/Documentation:
   Enabled: false
+
+# Allow explicit module assignment for closure access in adapters
+Style/RedundantAssignment:
+  Exclude:
+    - 'lib/rails_otel_context/adapters/**/*'
 
 # Allow memoization without @ prefix matching
 Naming/MemoizedInstanceVariableName:

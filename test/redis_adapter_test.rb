@@ -5,11 +5,11 @@ require 'ostruct'
 
 class RedisAdapterTest < Minitest::Test
   def setup
-    RailsOtelGoodies::Adapters::Redis.instance_variable_set(:@patch_module, nil)
+    RailsOtelContext::Adapters::Redis.instance_variable_set(:@patch_module, nil)
   end
 
   def test_call_injects_source_attributes
-    patch = RailsOtelGoodies::Adapters::Redis.send(:build_patch_module)
+    patch = RailsOtelContext::Adapters::Redis.send(:build_patch_module)
     patch.configure(app_root: Dir.pwd)
 
     middleware_class = new_middleware_class
@@ -28,7 +28,7 @@ class RedisAdapterTest < Minitest::Test
   end
 
   def test_call_pipelined_injects_source_attributes
-    patch = RailsOtelGoodies::Adapters::Redis.send(:build_patch_module)
+    patch = RailsOtelContext::Adapters::Redis.send(:build_patch_module)
     patch.configure(app_root: Dir.pwd)
 
     middleware_class = new_middleware_class
@@ -47,7 +47,7 @@ class RedisAdapterTest < Minitest::Test
   end
 
   def test_call_skips_attributes_when_source_missing
-    patch = RailsOtelGoodies::Adapters::Redis.send(:build_patch_module)
+    patch = RailsOtelContext::Adapters::Redis.send(:build_patch_module)
     patch.configure(app_root: '/unlikely/root')
 
     middleware_class = new_middleware_class
@@ -82,7 +82,7 @@ class RedisAdapterTest < Minitest::Test
 
     if had_original
       thread_singleton.class_eval do
-        alias_method :__otel_goodies_original_each_caller_location, :each_caller_location
+        alias_method :__rails_otel_context_original_each_caller_location, :each_caller_location
       end
     end
 
@@ -92,8 +92,8 @@ class RedisAdapterTest < Minitest::Test
   ensure
     if had_original
       thread_singleton.class_eval do
-        alias_method :each_caller_location, :__otel_goodies_original_each_caller_location
-        remove_method :__otel_goodies_original_each_caller_location
+        alias_method :each_caller_location, :__rails_otel_context_original_each_caller_location
+        remove_method :__rails_otel_context_original_each_caller_location
       end
     else
       thread_singleton.class_eval { remove_method :each_caller_location }
@@ -107,7 +107,7 @@ class RedisAdapterTest < Minitest::Test
 
     singleton.class_eval do
       if method_defined?(:with_attributes)
-        alias_method :__otel_goodies_original_with_attributes, :with_attributes
+        alias_method :__rails_otel_context_original_with_attributes, :with_attributes
       end
     end
 
@@ -119,9 +119,9 @@ class RedisAdapterTest < Minitest::Test
     yield calls
   ensure
     singleton.class_eval do
-      if method_defined?(:__otel_goodies_original_with_attributes)
-        alias_method :with_attributes, :__otel_goodies_original_with_attributes
-        remove_method :__otel_goodies_original_with_attributes
+      if method_defined?(:__rails_otel_context_original_with_attributes)
+        alias_method :with_attributes, :__rails_otel_context_original_with_attributes
+        remove_method :__rails_otel_context_original_with_attributes
       else
         remove_method :with_attributes
       end

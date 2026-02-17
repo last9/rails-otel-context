@@ -1,15 +1,15 @@
 # frozen_string_literal: true
 
-require 'rails_otel_goodies/adapters/pg'
-require 'rails_otel_goodies/adapters/mysql2'
-require 'rails_otel_goodies/adapters/redis'
-require 'rails_otel_goodies/adapters/clickhouse'
+require 'rails_otel_context/adapters/pg'
+require 'rails_otel_context/adapters/mysql2'
+require 'rails_otel_context/adapters/redis'
+require 'rails_otel_context/adapters/clickhouse'
 
-module RailsOtelGoodies
+module RailsOtelContext
   module Adapters
     module_function
 
-    def install!(app_root:, config: RailsOtelGoodies.configuration)
+    def install!(app_root:, config: RailsOtelContext.configuration)
       install_pg!(app_root: app_root, config: config)
       install_mysql2!(app_root: app_root, config: config)
       install_redis!(app_root: app_root, config: config)
