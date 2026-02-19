@@ -622,6 +622,190 @@ With `rails-otel-context`:
 
 **Benchmarks:** In typical Rails applications, the overhead is <0.1ms per database call—imperceptible compared to actual query execution time.
 
+## Integrating Log-Trace Correlation
+
+While `rails-otel-context` focuses on enriching database spans with source code locations, you can easily add **log-trace correlation** to link your logs to traces in your observability platform.
+
+**Why this isn't in the gem:** Log correlation is standard OpenTelemetry practice that's well-documented and simple to implement (2-3 lines of code). Every Rails application has different logging needs (Logger, Lograge, Semantic Logger, JSON formatters, etc.), so we provide integration examples rather than implementing it in the gem.
+
+### How It Works
+
+OpenTelemetry provides trace and span IDs via the current span context:
+
+```ruby
+span = OpenTelemetry::Trace.current_span
+trace_id = span.context.hex_trace_id  # "7f8a9b2c1d3e4f5a6b7c8d9e0f1a2b3c"
+span_id = span.context.hex_span_id    # "1a2b3c4d5e6f7a8b"
+```
+
+### Integration Examples
+
+#### Standard Rails Logger
+
+Add trace context to every log entry:
+
+```ruby
+# config/initializers/logging.rb
+Rails.application.config.after_initialize do
+  original_formatter = Rails.logger.formatter || Logger::Formatter.new
+
+  Rails.logger.formatter = proc do |severity, timestamp, progname, msg|
+    formatted_msg = original_formatter.call(severity, timestamp, progname, msg)
+
+    # Extract trace context
+    span = OpenTelemetry::Trace.current_span
+    if span&.context&.valid?
+      trace_id = span.context.hex_trace_id
+      span_id = span.context.hex_span_id
+      formatted_msg = formatted_msg.sub(/\n$/, '')
+      "#{formatted_msg} [trace_id=#{trace_id} span_id=#{span_id}]\n"
+    else
+      formatted_msg
+    end
+  end
+end
+```
+
+**Result:**
+```
+[2026-02-19 10:23:45] INFO User login successful [trace_id=abc123... span_id=def456...]
+```
+
+#### Lograge (Popular for Rails APIs)
+
+Add trace IDs to structured logs:
+
+```ruby
+# config/initializers/lograge.rb
+Rails.application.configure do
+  config.lograge.enabled = true
+  config.lograge.formatter = Lograge::Formatters::Json.new
+
+  config.lograge.custom_options = lambda do |event|
+    # Extract trace context following OpenTelemetry best practices
+    # https://github.com/open-telemetry/opentelemetry-ruby/discussions/1289
+    span = OpenTelemetry::Trace.current_span
+
+    if span&.context&.valid?
+      {
+        trace_id: span.context.hex_trace_id,
+        span_id: span.context.hex_span_id
+      }
+    else
+      {}
+    end
+  end
+end
+```
+
+**Result:**
+```json
+{
+  "method": "GET",
+  "path": "/api/users/123",
+  "status": 200,
+  "duration": 45.2,
+  "trace_id": "7f8a9b2c1d3e4f5a6b7c8d9e0f1a2b3c",
+  "span_id": "1a2b3c4d5e6f7a8b"
+}
+```
+
+#### Semantic Logger (Production-Grade Logging)
+
+Semantic Logger has built-in support for OpenTelemetry:
+
+```ruby
+# config/initializers/semantic_logger.rb
+require 'semantic_logger'
+
+SemanticLogger.add_appender(io: $stdout, formatter: :json)
+
+Rails.application.config.after_initialize do
+  Rails.logger = SemanticLogger[Rails.application.class.name]
+
+  # Add OpenTelemetry trace context to all logs
+  SemanticLogger.on_log do |log|
+    span = OpenTelemetry::Trace.current_span
+    if span&.context&.valid?
+      log.named_tags[:trace_id] = span.context.hex_trace_id
+      log.named_tags[:span_id] = span.context.hex_span_id
+    end
+  end
+end
+```
+
+#### JSON Formatter (For Cloud Logging)
+
+Custom JSON formatter with trace context:
+
+```ruby
+# lib/json_logger.rb
+class JsonLogger < Logger::Formatter
+  def call(severity, timestamp, progname, msg)
+    data = {
+      timestamp: timestamp.utc.iso8601(3),
+      severity: severity,
+      message: msg
+    }
+
+    # Add OpenTelemetry trace context
+    span = OpenTelemetry::Trace.current_span
+    if span&.context&.valid?
+      data[:trace_id] = span.context.hex_trace_id
+      data[:span_id] = span.context.hex_span_id
+    end
+
+    "#{data.to_json}\n"
+  end
+end
+
+# config/initializers/logging.rb
+Rails.logger.formatter = JsonLogger.new
+```
+
+**Result:**
+```json
+{"timestamp":"2026-02-19T10:23:45.123Z","severity":"INFO","message":"User login","trace_id":"abc123","span_id":"def456"}
+```
+
+### Using Log Correlation in Observability Platforms
+
+Once you've added `trace_id` and `span_id` to your logs, your observability platform can link them:
+
+**Datadog:**
+- Automatically correlates logs and traces when both have `trace_id` and `span_id`
+- Click "View Trace" button in log viewer to jump to the trace
+
+**Grafana/Loki:**
+- Use TraceQL to query: `{trace_id="abc123"}`
+- Tempo automatically links to Loki logs with matching trace IDs
+
+**Honeycomb:**
+- Traces and logs with matching `trace_id` appear together in the timeline
+- Use "Show Logs" to see correlated log events
+
+**Elastic APM:**
+- Searches logs by `trace.id` and `span.id` fields
+- Displays correlated logs in the trace waterfall view
+
+### Best Practices
+
+1. **Use the OpenTelemetry approach:** Always extract trace context via `OpenTelemetry::Trace.current_span` (don't use propagation headers)
+
+2. **Handle missing spans gracefully:** Check `span&.context&.valid?` before accessing trace IDs
+
+3. **Use hex format:** `hex_trace_id` and `hex_span_id` return W3C trace context format (what observability platforms expect)
+
+4. **Be consistent:** Use `trace_id` and `span_id` field names (lowercase, snake_case) across your logging
+
+5. **Consider performance:** Extracting trace context is fast (<0.01ms), but formatting large log messages can be expensive
+
+### References
+
+- [OpenTelemetry Ruby Log Correlation Discussion](https://github.com/open-telemetry/opentelemetry-ruby/discussions/1289)
+- [OpenTelemetry Logging Specification](https://opentelemetry.io/docs/specs/otel/logs/)
+- [Datadog Ruby Log-Trace Correlation](https://docs.datadoghq.com/tracing/other_telemetry/connect_logs_and_traces/ruby/)
+
 ## Compatibility
 
 ### Ruby Versions
