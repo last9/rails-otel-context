@@ -25,7 +25,10 @@ module RailsOtelContext
 
       span.set_attribute('code.namespace', context[:class_name])
       span.set_attribute('code.function', context[:method_name]) if context[:method_name]
-      span.set_attribute('code.lineno', context[:lineno]) if context[:lineno]
+      return unless context[:lineno]
+
+      span.set_attribute('code.filepath', context[:filepath])
+      span.set_attribute('code.lineno', context[:lineno])
     end
 
     def on_finish(_span); end
@@ -42,22 +45,23 @@ module RailsOtelContext
         next unless path&.start_with?(@app_root)
         next if path.include?('/gems/')
 
-        label = location.label || ''
-
-        lineno = location.lineno
+        label    = location.label || ''
+        lineno   = location.lineno
+        filepath = path.delete_prefix("#{@app_root}/")
 
         # Try label first: "ClassName.method" or "ClassName#method"
         if label =~ /^([A-Z][a-zA-Z0-9_]*(?:::[A-Z][a-zA-Z0-9_]*)*)(\.|\#)/
           class_name  = Regexp.last_match(1)
           method_name = label.split(/[.\#]/, 2).last
                              &.sub(/^(?:block|rescue|ensure) in /, '')
-          return { class_name: class_name, method_name: method_name, lineno: lineno }
+          return { class_name: class_name, method_name: method_name, lineno: lineno, filepath: filepath }
         end
 
         # Fallback: infer class from file-path basename (snake_case → CamelCase)
         class_name  = File.basename(path, '.rb').split('_').map(&:capitalize).join
         method_name = label.sub(/^(?:block|rescue|ensure) in /, '')
-        return { class_name: class_name, method_name: method_name.empty? ? nil : method_name, lineno: lineno }
+        return { class_name: class_name, method_name: method_name.empty? ? nil : method_name,
+                 lineno: lineno, filepath: filepath }
       end
 
       nil

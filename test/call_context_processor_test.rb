@@ -125,20 +125,31 @@ class CallContextProcessorTest < Minitest::Test
   # code.lineno
   # ---------------------------------------------------------------------------
 
-  def test_sets_code_lineno_from_label_pattern
+  def test_sets_code_lineno_and_filepath_from_label_pattern
     span = FakeSpan.new
     with_caller_location(path: "#{@app_root}/app/models/user.rb", label: 'User.find', lineno: 42) do
       @processor.on_start(span, nil)
     end
     assert_equal 42, span.attributes['code.lineno']
+    assert_equal 'app/models/user.rb', span.attributes['code.filepath']
   end
 
-  def test_sets_code_lineno_from_file_path_fallback
+  def test_sets_code_lineno_and_filepath_from_file_path_fallback
     span = FakeSpan.new
     with_caller_location(path: "#{@app_root}/app/jobs/invoice_job.rb", label: 'perform', lineno: 17) do
       @processor.on_start(span, nil)
     end
     assert_equal 17, span.attributes['code.lineno']
+    assert_equal 'app/jobs/invoice_job.rb', span.attributes['code.filepath']
+  end
+
+  def test_code_lineno_not_set_without_filepath_when_lineno_is_nil
+    span = FakeSpan.new
+    with_caller_location(path: "#{@app_root}/app/models/user.rb", label: 'User.find', lineno: nil) do
+      @processor.on_start(span, nil)
+    end
+    refute span.attributes.key?('code.lineno')
+    refute span.attributes.key?('code.filepath')
   end
 
   # ---------------------------------------------------------------------------
@@ -183,6 +194,7 @@ class CallContextProcessorTest < Minitest::Test
     assert_equal 'OrderService', span.attributes['code.namespace']
     assert_equal 'create', span.attributes['code.function']
     assert_equal 5, span.attributes['code.lineno']
+    assert_equal 'app/services/order_service.rb', span.attributes['code.filepath']
   end
 
   # ---------------------------------------------------------------------------
