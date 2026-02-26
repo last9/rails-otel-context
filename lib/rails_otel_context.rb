@@ -10,6 +10,7 @@ require 'rails_otel_context/version'
 require 'rails_otel_context/configuration'
 require 'rails_otel_context/activerecord_context'
 require 'rails_otel_context/adapters'
+require 'rails_otel_context/call_context_processor'
 require 'rails_otel_context/railtie' if defined?(Rails::Railtie)
 
 module RailsOtelContext
@@ -44,6 +45,9 @@ module RailsOtelContext
         bool_env('RAILS_OTEL_CONTEXT_CLICKHOUSE_ENABLED', config.clickhouse_enabled)
       config.clickhouse_slow_query_threshold_ms =
         float_env('RAILS_OTEL_CONTEXT_CLICKHOUSE_SLOW_QUERY_MS', config.clickhouse_slow_query_threshold_ms)
+
+      config.call_context_enabled =
+        bool_env('RAILS_OTEL_CONTEXT_CALL_CONTEXT_ENABLED', config.call_context_enabled)
 
       config
     end
