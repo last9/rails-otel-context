@@ -42,6 +42,8 @@ Metrics/BlockLength:
 
 Metrics/ClassLength:
   Max: 150
+  Exclude:
+    - 'test/**/*'
 
 # Tests can have higher complexity for thorough test coverage
 Lint/EnsureReturn:

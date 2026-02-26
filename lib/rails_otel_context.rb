@@ -27,7 +27,7 @@ module RailsOtelContext
       @configuration = Configuration.new
     end
 
-    def apply_env_configuration!(config = configuration)
+    def apply_env_configuration!(config = configuration) # rubocop:disable Metrics/AbcSize
       config.pg_slow_query_enabled =
         bool_env('RAILS_OTEL_CONTEXT_PG_SLOW_QUERY_ENABLED', config.pg_slow_query_enabled)
       config.pg_slow_query_threshold_ms =
