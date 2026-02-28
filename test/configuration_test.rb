@@ -53,4 +53,24 @@ class ConfigurationTest < Minitest::Test
       assert_equal true, config.clickhouse_enabled
     end
   end
+
+  def test_default_call_context_enabled_is_true
+    assert_equal true, RailsOtelContext.configuration.call_context_enabled
+  end
+
+  def test_call_context_enabled_env_var
+    with_env('RAILS_OTEL_CONTEXT_CALL_CONTEXT_ENABLED' => 'false') do
+      config = RailsOtelContext.apply_env_configuration!
+      assert_equal false, config.call_context_enabled
+    end
+  end
+
+  def test_call_context_enabled_env_var_truthy_values
+    %w[1 true yes on].each do |val|
+      with_env('RAILS_OTEL_CONTEXT_CALL_CONTEXT_ENABLED' => val) do
+        config = RailsOtelContext.apply_env_configuration!
+        assert_equal true, config.call_context_enabled, "Expected true for ENV value '#{val}'"
+      end
+    end
+  end
 end
