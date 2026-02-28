@@ -59,6 +59,11 @@ Style/OpenStructUse:
 Style/Documentation:
   Enabled: false
 
+# test_helper legitimately groups related helper modules in one file
+Style/OneClassPerFile:
+  Exclude:
+    - 'test/**/*'
+
 # Allow explicit module assignment for closure access in adapters
 Style/RedundantAssignment:
   Exclude:
