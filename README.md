@@ -51,9 +51,20 @@ All adapters intelligently filter stack traces to show only your application cod
 
 **Why this matters:** You see `app/models/checkout.rb:88` instead of deeply nested gem internals that don't help with debugging.
 
-### 5. **Zero-Config Rails Integration**
+### 5. **Caller Context on All Spans**
+A SpanProcessor automatically enriches **every** span in your application—not just database spans—with the calling Ruby class, method, and line number:
+- `code.namespace` - The calling class name (e.g., "OrderService", "InvoiceJob", "ProductsController")
+- `code.function` - The calling method name (e.g., "create", "perform", "index")
+- `code.lineno` - The exact line number where the span was created
+
+**Why this matters:** HTTP spans, background job spans, and custom spans previously had no caller context. Now you can see that a slow external HTTP call originated from `InvoiceJob#perform` at line 42—without any manual instrumentation.
+
+**Note:** Controller spans already have `code.namespace`/`code.function` set by the standard `opentelemetry-instrumentation-action_pack` gem. The processor adds this context to everything that doesn't already have it.
+
+### 6. **Zero-Config Rails Integration**
 Automatic setup via Railtie—just add the gem:
 - Adapters install automatically when ActiveRecord loads
+- Caller context processor registers after the OTel SDK is configured
 - Environment variable configuration support
 - No manual initialization code required
 - Integrates seamlessly with Rails boot process
@@ -108,6 +119,24 @@ Enhances the official `opentelemetry-instrumentation-redis` gem:
 - `code.lineno` - Line number where Redis call originated
 
 **Note:** Unlike database adapters, Redis tracking doesn't use slow query thresholds—it's all-or-nothing to avoid complexity with pipelined operations.
+
+### Caller Context Processor
+**Status:** ✅ Implemented
+
+Enriches every span in the application with the calling Ruby class and method via an OpenTelemetry SpanProcessor:
+- Hooks into `on_start` for all spans application-wide
+- Walks the call stack to find the first frame inside your application code (skips gems and stdlib)
+- Infers class names from frame labels (`"User.find"` → `User`) or from file-path basenames (`order_service.rb` → `OrderService`)
+- Strips `block in` / `rescue in` / `ensure in` label prefixes automatically
+
+**Added Attributes:**
+- `code.namespace` - Calling class name (e.g., "InvoiceJob", "OrderService")
+- `code.function` - Calling method name (e.g., "perform", "create")
+- `code.lineno` - Line number where the span was initiated
+
+**Configuration:**
+- Enabled by default (opt-out)
+- Set `call_context_enabled = false` or `RAILS_OTEL_CONTEXT_CALL_CONTEXT_ENABLED=false` to disable
 
 ### ClickHouse (`clickhouse`)
 **Status:** ✅ Implemented
@@ -181,6 +210,9 @@ RailsOtelContext.configure do |c|
   # ClickHouse instrumentation and slow query tracking
   c.clickhouse_enabled = true
   c.clickhouse_slow_query_threshold_ms = 200.0
+
+  # Caller context on all spans (code.namespace, code.function, code.lineno)
+  c.call_context_enabled = true
 end
 ```
 
@@ -262,6 +294,9 @@ export RAILS_OTEL_CONTEXT_REDIS_SOURCE_ENABLED=false
 # ClickHouse
 export RAILS_OTEL_CONTEXT_CLICKHOUSE_ENABLED=true
 export RAILS_OTEL_CONTEXT_CLICKHOUSE_SLOW_QUERY_MS=200.0
+
+# Caller context processor (all spans)
+export RAILS_OTEL_CONTEXT_CALL_CONTEXT_ENABLED=true
 ```
 
 **Supported boolean values:** `1`, `true`, `yes`, `on` (case-insensitive) → `true` | `0`, `false`, `no`, `off` → `false`
@@ -278,6 +313,7 @@ export RAILS_OTEL_CONTEXT_CLICKHOUSE_SLOW_QUERY_MS=200.0
 | `RAILS_OTEL_CONTEXT_REDIS_SOURCE_ENABLED` | `false` | Enable/disable Redis source location tracking |
 | `RAILS_OTEL_CONTEXT_CLICKHOUSE_ENABLED` | `true` | Enable/disable ClickHouse instrumentation |
 | `RAILS_OTEL_CONTEXT_CLICKHOUSE_SLOW_QUERY_MS` | `200.0` | ClickHouse slow query threshold in milliseconds |
+| `RAILS_OTEL_CONTEXT_CALL_CONTEXT_ENABLED` | `true` | Enable/disable caller context on all spans |
 
 ## Configuration Best Practices
 
@@ -400,6 +436,7 @@ environment:
   RAILS_OTEL_CONTEXT_REDIS_SOURCE_ENABLED: "false"
   RAILS_OTEL_CONTEXT_CLICKHOUSE_ENABLED: "true"
   RAILS_OTEL_CONTEXT_CLICKHOUSE_SLOW_QUERY_MS: "200"
+  RAILS_OTEL_CONTEXT_CALL_CONTEXT_ENABLED: "true"
 ```
 
 No code changes needed—the gem reads these automatically!
@@ -539,6 +576,42 @@ With `rails-otel-context`:
   "db.query.slow_threshold_ms": 200.0
 }
 ```
+
+### Caller Context on All Spans
+
+Every span—including HTTP requests, background jobs, and custom spans—now carries the calling Ruby class and method:
+
+**Background job span (Sidekiq/ActiveJob):**
+```json
+{
+  "name": "InvoiceJob",
+  "code.namespace": "InvoiceJob",
+  "code.function": "perform",
+  "code.lineno": 12
+}
+```
+
+**External HTTP call from a service class:**
+```json
+{
+  "name": "HTTP POST",
+  "code.namespace": "PaymentGatewayService",
+  "code.function": "charge",
+  "code.lineno": 58
+}
+```
+
+**Custom span from application code:**
+```json
+{
+  "name": "pdf.generate",
+  "code.namespace": "ReportExporter",
+  "code.function": "export_monthly",
+  "code.lineno": 34
+}
+```
+
+**The difference:** Previously these spans had no caller context—you could see a span existed but not which class or method created it. Now you can filter, group, and drill into spans by calling class without adding any manual instrumentation.
 
 ## Troubleshooting
 
