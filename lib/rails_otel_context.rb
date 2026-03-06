@@ -38,6 +38,11 @@ module RailsOtelContext
       config.mysql2_slow_query_threshold_ms =
         float_env('RAILS_OTEL_CONTEXT_MYSQL2_SLOW_QUERY_MS', config.mysql2_slow_query_threshold_ms)
 
+      config.trilogy_slow_query_enabled =
+        bool_env('RAILS_OTEL_CONTEXT_TRILOGY_SLOW_QUERY_ENABLED', config.trilogy_slow_query_enabled)
+      config.trilogy_slow_query_threshold_ms =
+        float_env('RAILS_OTEL_CONTEXT_TRILOGY_SLOW_QUERY_MS', config.trilogy_slow_query_threshold_ms)
+
       config.redis_source_enabled =
         bool_env('RAILS_OTEL_CONTEXT_REDIS_SOURCE_ENABLED', config.redis_source_enabled)
       config.clickhouse_enabled =

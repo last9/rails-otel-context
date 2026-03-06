@@ -15,6 +15,8 @@ class ConfigurationTest < Minitest::Test
       'RAILS_OTEL_CONTEXT_PG_SLOW_QUERY_MS' => '450.5',
       'RAILS_OTEL_CONTEXT_MYSQL2_SLOW_QUERY_ENABLED' => 'true',
       'RAILS_OTEL_CONTEXT_MYSQL2_SLOW_QUERY_MS' => '600',
+      'RAILS_OTEL_CONTEXT_TRILOGY_SLOW_QUERY_ENABLED' => 'false',
+      'RAILS_OTEL_CONTEXT_TRILOGY_SLOW_QUERY_MS' => '350',
       'RAILS_OTEL_CONTEXT_REDIS_SOURCE_ENABLED' => 'true',
       'RAILS_OTEL_CONTEXT_CLICKHOUSE_ENABLED' => 'false',
       'RAILS_OTEL_CONTEXT_CLICKHOUSE_SLOW_QUERY_MS' => '700'
@@ -25,6 +27,8 @@ class ConfigurationTest < Minitest::Test
       assert_equal 450.5, config.pg_slow_query_threshold_ms
       assert_equal true, config.mysql2_slow_query_enabled
       assert_equal 600.0, config.mysql2_slow_query_threshold_ms
+      assert_equal false, config.trilogy_slow_query_enabled
+      assert_equal 350.0, config.trilogy_slow_query_threshold_ms
       assert_equal true, config.redis_source_enabled
       assert_equal false, config.clickhouse_enabled
       assert_equal 700.0, config.clickhouse_slow_query_threshold_ms
@@ -50,6 +54,7 @@ class ConfigurationTest < Minitest::Test
       assert_equal true, config.pg_slow_query_enabled
       assert_equal 200.0, config.pg_slow_query_threshold_ms
       assert_equal true, config.mysql2_slow_query_enabled
+      assert_equal true, config.trilogy_slow_query_enabled
       assert_equal true, config.clickhouse_enabled
     end
   end
