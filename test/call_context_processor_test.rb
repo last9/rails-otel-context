@@ -230,7 +230,7 @@ class CallContextProcessorTest < Minitest::Test
   end
 
   def test_custom_attributes_nil_return_is_noop
-    RailsOtelContext.configure { |c| c.custom_span_attributes = -> { nil } }
+    RailsOtelContext.configure { |c| c.custom_span_attributes = -> {} }
     proc = new_processor
     span = FakeSpan.new
     proc.on_start(span, nil)
@@ -240,7 +240,10 @@ class CallContextProcessorTest < Minitest::Test
   def test_custom_attributes_empty_hash_is_noop
     call_count = 0
     RailsOtelContext.configure do |c|
-      c.custom_span_attributes = -> { call_count += 1; {} }
+      c.custom_span_attributes = lambda {
+        call_count += 1
+        {}
+      }
     end
     proc = new_processor
     span = FakeSpan.new
@@ -273,7 +276,10 @@ class CallContextProcessorTest < Minitest::Test
   def test_custom_attributes_disabled_via_flag
     call_count = 0
     RailsOtelContext.configure do |c|
-      c.custom_span_attributes = -> { call_count += 1; { 'team' => 'backend' } }
+      c.custom_span_attributes = lambda {
+        call_count += 1
+        { 'team' => 'backend' }
+      }
       c.custom_span_attributes_enabled = false
     end
     proc = new_processor

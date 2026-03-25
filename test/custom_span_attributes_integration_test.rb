@@ -11,7 +11,7 @@ class FakeCurrent
     'chat_rooms' => 'messaging',
     'notifications' => 'messaging',
     'payments' => 'billing',
-    'posts' => 'content',
+    'posts' => 'content'
   }.freeze
 
   def self.reset!
@@ -52,7 +52,7 @@ class CustomSpanAttributesIntegrationTest < Minitest::Test
   def test_team_propagates_to_all_child_spans
     RailsOtelContext.configure do |c|
       c.call_context_enabled = false # isolate custom attributes test
-      c.custom_span_attributes = -> {
+      c.custom_span_attributes = lambda {
         team = FakeCurrent.team
         team ? { 'team' => team } : nil
       }
@@ -85,7 +85,7 @@ class CustomSpanAttributesIntegrationTest < Minitest::Test
   def test_different_requests_get_different_teams
     RailsOtelContext.configure do |c|
       c.call_context_enabled = false
-      c.custom_span_attributes = -> {
+      c.custom_span_attributes = lambda {
         team = FakeCurrent.team
         team ? { 'team' => team } : nil
       }
@@ -113,7 +113,7 @@ class CustomSpanAttributesIntegrationTest < Minitest::Test
   def test_no_team_set_means_no_attribute
     RailsOtelContext.configure do |c|
       c.call_context_enabled = false
-      c.custom_span_attributes = -> {
+      c.custom_span_attributes = lambda {
         team = FakeCurrent.team
         team ? { 'team' => team } : nil
       }
@@ -132,7 +132,10 @@ class CustomSpanAttributesIntegrationTest < Minitest::Test
   def test_env_var_disables_custom_attributes_at_runtime
     call_count = 0
     RailsOtelContext.configure do |c|
-      c.custom_span_attributes = -> { call_count += 1; { 'team' => 'billing' } }
+      c.custom_span_attributes = lambda {
+        call_count += 1
+        { 'team' => 'billing' }
+      }
       c.custom_span_attributes_enabled = false # simulates env var = false
     end
 
@@ -150,7 +153,7 @@ class CustomSpanAttributesIntegrationTest < Minitest::Test
   # -------------------------------------------------------------------
 
   def test_frozen_hash_values_work
-    frozen_attrs = { 'team' => 'billing'.freeze, 'region' => 'us-east'.freeze }.freeze
+    frozen_attrs = { 'team' => 'billing', 'region' => 'us-east' }.freeze
     RailsOtelContext.configure do |c|
       c.call_context_enabled = false
       c.custom_span_attributes = -> { frozen_attrs }
@@ -169,7 +172,7 @@ class CustomSpanAttributesIntegrationTest < Minitest::Test
   def test_custom_attributes_with_code_context_full_flow
     RailsOtelContext.configure do |c|
       c.call_context_enabled = true
-      c.custom_span_attributes = -> {
+      c.custom_span_attributes = lambda {
         team = FakeCurrent.team
         team ? { 'team' => team } : nil
       }
