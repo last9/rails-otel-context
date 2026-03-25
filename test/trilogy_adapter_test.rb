@@ -76,7 +76,7 @@ class TrilogyAdapterTest < Minitest::Test
     client_class.prepend(patch)
     client = client_class.new
 
-    RailsOtelContext.configuration.span_name_formatter = ->(original, ar_context) {
+    RailsOtelContext.configuration.span_name_formatter = lambda { |_original, ar_context|
       "#{ar_context[:model_name]}.#{ar_context[:method_name]}"
     }
 
@@ -132,7 +132,7 @@ class TrilogyAdapterTest < Minitest::Test
   end
 
   def test_install_skips_when_trilogy_not_defined
-    refute defined?(::Trilogy), "::Trilogy should not be defined in test environment"
+    refute defined?(::Trilogy), '::Trilogy should not be defined in test environment'
     RailsOtelContext::Adapters::Trilogy.install!(app_root: Dir.pwd, threshold_ms: 200.0)
   end
 
@@ -147,8 +147,6 @@ class TrilogyAdapterTest < Minitest::Test
 
     patch = RailsOtelContext::Adapters::Trilogy.patch_module_for
     patch.configure(app_root: Dir.pwd, threshold_ms: 200.0)
-
-    ancestors_before = stub_trilogy.ancestors.dup
 
     # Install once
     RailsOtelContext::Adapters::Trilogy.install!(app_root: Dir.pwd, threshold_ms: 200.0)
