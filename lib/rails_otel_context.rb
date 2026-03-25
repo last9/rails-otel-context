@@ -27,7 +27,7 @@ module RailsOtelContext
       @configuration = Configuration.new
     end
 
-    def apply_env_configuration!(config = configuration) # rubocop:disable Metrics/AbcSize
+    def apply_env_configuration!(config = configuration)
       config.pg_slow_query_enabled =
         bool_env('RAILS_OTEL_CONTEXT_PG_SLOW_QUERY_ENABLED', config.pg_slow_query_enabled)
       config.pg_slow_query_threshold_ms =
@@ -38,6 +38,11 @@ module RailsOtelContext
         bool_env('RAILS_OTEL_CONTEXT_MYSQL2_SLOW_QUERY_ENABLED', config.mysql2_slow_query_enabled)
       config.mysql2_slow_query_threshold_ms =
         float_env('RAILS_OTEL_CONTEXT_MYSQL2_SLOW_QUERY_MS', config.mysql2_slow_query_threshold_ms)
+
+      config.trilogy_slow_query_enabled =
+        bool_env('RAILS_OTEL_CONTEXT_TRILOGY_SLOW_QUERY_ENABLED', config.trilogy_slow_query_enabled)
+      config.trilogy_slow_query_threshold_ms =
+        float_env('RAILS_OTEL_CONTEXT_TRILOGY_SLOW_QUERY_MS', config.trilogy_slow_query_threshold_ms)
 
       config.redis_source_enabled =
         bool_env('RAILS_OTEL_CONTEXT_REDIS_SOURCE_ENABLED', config.redis_source_enabled)

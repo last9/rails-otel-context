@@ -2,6 +2,7 @@
 
 require 'rails_otel_context/adapters/pg'
 require 'rails_otel_context/adapters/mysql2'
+require 'rails_otel_context/adapters/trilogy'
 require 'rails_otel_context/adapters/redis'
 require 'rails_otel_context/adapters/clickhouse'
 
@@ -12,6 +13,7 @@ module RailsOtelContext
     def install!(app_root:, config: RailsOtelContext.configuration)
       install_pg!(app_root: app_root, config: config)
       install_mysql2!(app_root: app_root, config: config)
+      install_trilogy!(app_root: app_root, config: config)
       install_redis!(app_root: app_root, config: config)
       install_clickhouse!(app_root: app_root, config: config)
     end
@@ -26,6 +28,12 @@ module RailsOtelContext
       return unless config.mysql2_slow_query_enabled
 
       Mysql2.install!(app_root: app_root, threshold_ms: config.mysql2_slow_query_threshold_ms)
+    end
+
+    def install_trilogy!(app_root:, config:)
+      return unless config.trilogy_slow_query_enabled
+
+      Trilogy.install!(app_root: app_root, threshold_ms: config.trilogy_slow_query_threshold_ms)
     end
 
     def install_redis!(app_root:, config:)

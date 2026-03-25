@@ -17,6 +17,7 @@ Metrics/MethodLength:
 Metrics/AbcSize:
   Max: 25
   Exclude:
+    - 'lib/rails_otel_context.rb'
     - 'lib/rails_otel_context/adapters/**/*'
     - 'lib/rails_otel_context/activerecord_context.rb'
     - 'test/**/*'
