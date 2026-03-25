@@ -32,10 +32,11 @@ class FakeCurrent
 end
 
 class CustomSpanAttributesIntegrationTest < Minitest::Test
+  include CallerLocationHelpers
+
   def setup
     RailsOtelContext.reset_configuration!
     @app_root = '/myapp'
-    @processor = RailsOtelContext::CallContextProcessor.new(app_root: @app_root)
     FakeCurrent.reset!
   end
 
@@ -62,22 +63,22 @@ class CustomSpanAttributesIntegrationTest < Minitest::Test
 
     # Root span (controller)
     root_span = FakeSpan.new
-    @processor.on_start(root_span, nil)
+    new_processor.on_start(root_span, nil)
     assert_equal 'messaging', root_span.attributes['team']
 
     # Child span (ActiveRecord query)
     db_span = FakeSpan.new
-    @processor.on_start(db_span, nil)
+    new_processor.on_start(db_span, nil)
     assert_equal 'messaging', db_span.attributes['team']
 
     # Child span (HTTP client call)
     http_span = FakeSpan.new
-    @processor.on_start(http_span, nil)
+    new_processor.on_start(http_span, nil)
     assert_equal 'messaging', http_span.attributes['team']
 
     # Child span (Redis)
     redis_span = FakeSpan.new
-    @processor.on_start(redis_span, nil)
+    new_processor.on_start(redis_span, nil)
     assert_equal 'messaging', redis_span.attributes['team']
   end
 
@@ -93,19 +94,19 @@ class CustomSpanAttributesIntegrationTest < Minitest::Test
     # Request 1: chat controller
     FakeCurrent.team = FakeCurrent.resolve_team('chat_rooms')
     span1 = FakeSpan.new
-    @processor.on_start(span1, nil)
+    new_processor.on_start(span1, nil)
     assert_equal 'messaging', span1.attributes['team']
 
     # Request 2: payments controller
     FakeCurrent.team = FakeCurrent.resolve_team('payments')
     span2 = FakeSpan.new
-    @processor.on_start(span2, nil)
+    new_processor.on_start(span2, nil)
     assert_equal 'billing', span2.attributes['team']
 
     # Request 3: unknown controller (no team mapping)
     FakeCurrent.team = FakeCurrent.resolve_team('unknown_controller')
     span3 = FakeSpan.new
-    @processor.on_start(span3, nil)
+    new_processor.on_start(span3, nil)
     refute span3.attributes.key?('team')
   end
 
@@ -120,7 +121,7 @@ class CustomSpanAttributesIntegrationTest < Minitest::Test
 
     # Current.team is nil (not set by any before_action)
     span = FakeSpan.new
-    @processor.on_start(span, nil)
+    new_processor.on_start(span, nil)
     refute span.attributes.key?('team')
   end
 
@@ -138,7 +139,7 @@ class CustomSpanAttributesIntegrationTest < Minitest::Test
     FakeCurrent.team = 'billing'
 
     span = FakeSpan.new
-    @processor.on_start(span, nil)
+    new_processor.on_start(span, nil)
 
     assert_equal 0, call_count, 'callback should not be invoked when disabled'
     refute span.attributes.key?('team')
@@ -156,7 +157,7 @@ class CustomSpanAttributesIntegrationTest < Minitest::Test
     end
 
     span = FakeSpan.new
-    @processor.on_start(span, nil)
+    new_processor.on_start(span, nil)
     assert_equal 'billing', span.attributes['team']
     assert_equal 'us-east', span.attributes['region']
   end
@@ -178,7 +179,7 @@ class CustomSpanAttributesIntegrationTest < Minitest::Test
 
     span = FakeSpan.new
     with_caller_location(path: "#{@app_root}/app/controllers/posts_controller.rb", label: 'PostsController#index') do
-      @processor.on_start(span, nil)
+      new_processor.on_start(span, nil)
     end
 
     # code context attributes
@@ -201,7 +202,7 @@ class CustomSpanAttributesIntegrationTest < Minitest::Test
 
     span = FakeSpan.new
     with_caller_location(path: "#{@app_root}/app/models/user.rb", label: 'User.find') do
-      @processor.on_start(span, nil)
+      new_processor.on_start(span, nil)
     end
 
     # code context still works even though custom callback raised
@@ -212,37 +213,7 @@ class CustomSpanAttributesIntegrationTest < Minitest::Test
 
   private
 
-  def location(path, label, lineno = nil)
-    OpenStruct.new(absolute_path: path, path: path, label: label, lineno: lineno)
-  end
-
-  def with_caller_location(path:, label:, lineno: nil, &block)
-    with_multiple_caller_locations([location(path, label, lineno)], &block)
-  end
-
-  def with_multiple_caller_locations(locations)
-    thread_singleton = Thread.singleton_class
-    had_original = Thread.respond_to?(:each_caller_location)
-
-    if had_original
-      thread_singleton.class_eval do
-        alias_method :__custom_test_original_each_caller_location, :each_caller_location
-      end
-    end
-
-    thread_singleton.define_method(:each_caller_location) do |&blk|
-      locations.each { |loc| blk.call(loc) }
-    end
-
-    yield
-  ensure
-    if had_original
-      thread_singleton.class_eval do
-        alias_method :each_caller_location, :__custom_test_original_each_caller_location
-        remove_method :__custom_test_original_each_caller_location
-      end
-    else
-      thread_singleton.class_eval { remove_method :each_caller_location }
-    end
+  def new_processor
+    RailsOtelContext::CallContextProcessor.new(app_root: @app_root)
   end
 end

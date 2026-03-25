@@ -4,6 +4,8 @@ require_relative 'test_helper'
 require 'ostruct'
 
 class CallContextProcessorTest < Minitest::Test
+  include CallerLocationHelpers
+
   def setup
     RailsOtelContext.reset_configuration!
     @app_root = '/myapp'
@@ -203,9 +205,10 @@ class CallContextProcessorTest < Minitest::Test
 
   def test_does_nothing_when_call_context_disabled
     RailsOtelContext.configure { |c| c.call_context_enabled = false }
+    proc = new_processor
     span = FakeSpan.new
     with_caller_location(path: "#{@app_root}/app/jobs/invoice_job.rb", label: 'perform') do
-      @processor.on_start(span, nil)
+      proc.on_start(span, nil)
     end
     refute span.attributes.key?('code.namespace')
     refute span.attributes.key?('code.function')
@@ -219,16 +222,18 @@ class CallContextProcessorTest < Minitest::Test
     RailsOtelContext.configure do |c|
       c.custom_span_attributes = -> { { 'team' => 'payments', 'domain' => 'checkout' } }
     end
+    proc = new_processor
     span = FakeSpan.new
-    @processor.on_start(span, nil)
+    proc.on_start(span, nil)
     assert_equal 'payments', span.attributes['team']
     assert_equal 'checkout', span.attributes['domain']
   end
 
   def test_custom_attributes_nil_return_is_noop
     RailsOtelContext.configure { |c| c.custom_span_attributes = -> { nil } }
+    proc = new_processor
     span = FakeSpan.new
-    @processor.on_start(span, nil)
+    proc.on_start(span, nil)
     refute span.attributes.key?('team')
   end
 
@@ -237,8 +242,9 @@ class CallContextProcessorTest < Minitest::Test
     RailsOtelContext.configure do |c|
       c.custom_span_attributes = -> { call_count += 1; {} }
     end
+    proc = new_processor
     span = FakeSpan.new
-    @processor.on_start(span, nil)
+    proc.on_start(span, nil)
     assert_equal 1, call_count
     refute span.attributes.key?('team')
   end
@@ -247,8 +253,9 @@ class CallContextProcessorTest < Minitest::Test
     RailsOtelContext.configure do |c|
       c.custom_span_attributes = -> { { 'team' => 'backend', 'domain' => nil } }
     end
+    proc = new_processor
     span = FakeSpan.new
-    @processor.on_start(span, nil)
+    proc.on_start(span, nil)
     assert_equal 'backend', span.attributes['team']
     refute span.attributes.key?('domain')
   end
@@ -257,9 +264,9 @@ class CallContextProcessorTest < Minitest::Test
     RailsOtelContext.configure do |c|
       c.custom_span_attributes = -> { raise 'boom' }
     end
+    proc = new_processor
     span = FakeSpan.new
-    # Must not raise — exceptions in user callbacks are silently rescued
-    @processor.on_start(span, nil)
+    proc.on_start(span, nil)
     refute span.attributes.key?('team')
   end
 
@@ -269,8 +276,9 @@ class CallContextProcessorTest < Minitest::Test
       c.custom_span_attributes = -> { call_count += 1; { 'team' => 'backend' } }
       c.custom_span_attributes_enabled = false
     end
+    proc = new_processor
     span = FakeSpan.new
-    @processor.on_start(span, nil)
+    proc.on_start(span, nil)
     assert_equal 0, call_count
     refute span.attributes.key?('team')
   end
@@ -280,11 +288,10 @@ class CallContextProcessorTest < Minitest::Test
       c.call_context_enabled = false
       c.custom_span_attributes = -> { { 'team' => 'platform' } }
     end
+    proc = new_processor
     span = FakeSpan.new
-    @processor.on_start(span, nil)
-    # call context should not be set
+    proc.on_start(span, nil)
     refute span.attributes.key?('code.namespace')
-    # custom attributes should still be set
     assert_equal 'platform', span.attributes['team']
   end
 
@@ -292,9 +299,10 @@ class CallContextProcessorTest < Minitest::Test
     RailsOtelContext.configure do |c|
       c.custom_span_attributes = -> { { 'team' => 'notifications' } }
     end
+    proc = new_processor
     span = FakeSpan.new
     with_caller_location(path: "#{@app_root}/app/models/user.rb", label: 'User.find') do
-      @processor.on_start(span, nil)
+      proc.on_start(span, nil)
     end
     assert_equal 'User', span.attributes['code.namespace']
     assert_equal 'notifications', span.attributes['team']
@@ -331,37 +339,7 @@ class CallContextProcessorTest < Minitest::Test
 
   private
 
-  def location(path, label, lineno = nil)
-    OpenStruct.new(absolute_path: path, path: path, label: label, lineno: lineno)
-  end
-
-  def with_caller_location(path:, label:, lineno: nil, &block)
-    with_multiple_caller_locations([location(path, label, lineno)], &block)
-  end
-
-  def with_multiple_caller_locations(locations)
-    thread_singleton = Thread.singleton_class
-    had_original = Thread.respond_to?(:each_caller_location)
-
-    if had_original
-      thread_singleton.class_eval do
-        alias_method :__call_ctx_original_each_caller_location, :each_caller_location
-      end
-    end
-
-    thread_singleton.define_method(:each_caller_location) do |&blk|
-      locations.each { |loc| blk.call(loc) }
-    end
-
-    yield
-  ensure
-    if had_original
-      thread_singleton.class_eval do
-        alias_method :each_caller_location, :__call_ctx_original_each_caller_location
-        remove_method :__call_ctx_original_each_caller_location
-      end
-    else
-      thread_singleton.class_eval { remove_method :each_caller_location }
-    end
+  def new_processor
+    RailsOtelContext::CallContextProcessor.new(app_root: @app_root)
   end
 end

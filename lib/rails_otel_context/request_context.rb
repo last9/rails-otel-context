@@ -21,6 +21,12 @@ module RailsOtelContext
         Thread.current[ACTION_KEY]     = action
       end
 
+      # Returns [controller, action] in a single Thread.current access.
+      def fetch
+        t = Thread.current
+        [t[CONTROLLER_KEY], t[ACTION_KEY]]
+      end
+
       def controller
         Thread.current[CONTROLLER_KEY]
       end
