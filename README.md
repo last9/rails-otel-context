@@ -272,6 +272,81 @@ end
 
 See [`examples/rails/span_name_formatter_example.rb`](examples/rails/span_name_formatter_example.rb) for more examples.
 
+### Custom Span Attributes
+
+Propagate request-scoped attributes (like team, domain, tenant) to **every span** in a trace — including database queries, HTTP calls, Redis operations, and background jobs.
+
+This is useful for splitting a monolith into virtual services, adding tenant context, or any scenario where you need an attribute on all spans, not just the root controller span.
+
+```ruby
+# config/initializers/rails_otel_context.rb
+RailsOtelContext.configure do |c|
+  c.custom_span_attributes = lambda {
+    team = Current.team
+    team ? { 'team' => team } : nil
+  }
+end
+```
+
+The lambda is called on every span start. It should be fast — reading a thread-local (`Current` attribute) is ~10ns. Return `nil` or an empty hash to skip setting attributes. Nil values in the returned hash are automatically skipped.
+
+**Setting the value in your controller:**
+
+```ruby
+# app/models/current.rb
+class Current < ActiveSupport::CurrentAttributes
+  attribute :team
+end
+
+# app/controllers/application_controller.rb
+TEAM_MAP = {
+  'payments'      => 'billing',
+  'chat_rooms'    => 'messaging',
+  'spaces'        => 'content'
+}.freeze
+
+before_action :set_team_context
+
+def set_team_context
+  Current.team = TEAM_MAP[controller_name]
+end
+```
+
+Every span created during the request (DB queries, HTTP calls, Redis, Sidekiq jobs) will have `team` set automatically.
+
+**Safety guarantees:**
+- Exceptions in the callback are silently rescued — your application is never affected
+- Setting the callback to `nil` disables it: `c.custom_span_attributes = nil`
+- Non-callable values raise `ArgumentError` at configuration time (fail fast)
+
+**Instant rollback** without code changes or redeployment:
+
+```bash
+export RAILS_OTEL_CONTEXT_CUSTOM_SPAN_ATTRIBUTES_ENABLED=false
+```
+
+### Request Context Propagation
+
+Automatically propagate `request.controller` and `request.action` to all child spans within a request. This lets you answer "which controller triggered this slow DB query?" without needing to look at the parent span.
+
+```ruby
+# config/initializers/rails_otel_context.rb
+RailsOtelContext.configure do |c|
+  c.request_context_enabled = true
+end
+```
+
+When enabled, the gem installs an `around_action` on `ActionController::Base` that:
+1. Sets `request.controller` (e.g., `Api::PaymentsController`) and `request.action` (e.g., `create`) at request start
+2. Propagates them to every child span via the SpanProcessor
+3. Clears them in an `ensure` block — no leakage between requests, even on exceptions
+
+**Instant rollback:**
+
+```bash
+export RAILS_OTEL_CONTEXT_REQUEST_CONTEXT_ENABLED=false
+```
+
 ### Environment Variable Configuration
 
 All settings can be controlled via environment variables—ideal for container deployments:
@@ -297,6 +372,12 @@ export RAILS_OTEL_CONTEXT_CLICKHOUSE_SLOW_QUERY_MS=200.0
 
 # Caller context processor (all spans)
 export RAILS_OTEL_CONTEXT_CALL_CONTEXT_ENABLED=true
+
+# Custom span attributes
+export RAILS_OTEL_CONTEXT_CUSTOM_SPAN_ATTRIBUTES_ENABLED=true
+
+# Request context propagation
+export RAILS_OTEL_CONTEXT_REQUEST_CONTEXT_ENABLED=false
 ```
 
 **Supported boolean values:** `1`, `true`, `yes`, `on` (case-insensitive) → `true` | `0`, `false`, `no`, `off` → `false`
@@ -314,6 +395,8 @@ export RAILS_OTEL_CONTEXT_CALL_CONTEXT_ENABLED=true
 | `RAILS_OTEL_CONTEXT_CLICKHOUSE_ENABLED` | `true` | Enable/disable ClickHouse instrumentation |
 | `RAILS_OTEL_CONTEXT_CLICKHOUSE_SLOW_QUERY_MS` | `200.0` | ClickHouse slow query threshold in milliseconds |
 | `RAILS_OTEL_CONTEXT_CALL_CONTEXT_ENABLED` | `true` | Enable/disable caller context on all spans |
+| `RAILS_OTEL_CONTEXT_CUSTOM_SPAN_ATTRIBUTES_ENABLED` | `true` | Enable/disable custom span attributes callback |
+| `RAILS_OTEL_CONTEXT_REQUEST_CONTEXT_ENABLED` | `false` | Enable/disable request controller/action propagation |
 
 ## Configuration Best Practices
 
