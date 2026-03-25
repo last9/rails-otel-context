@@ -78,4 +78,48 @@ class ConfigurationTest < Minitest::Test
       end
     end
   end
+
+  def test_default_custom_span_attributes_is_nil
+    assert_nil RailsOtelContext.configuration.custom_span_attributes
+  end
+
+  def test_default_custom_span_attributes_enabled_is_true
+    assert_equal true, RailsOtelContext.configuration.custom_span_attributes_enabled
+  end
+
+  def test_custom_span_attributes_accepts_lambda
+    fn = -> { { 'team' => 'payments' } }
+    RailsOtelContext.configure { |c| c.custom_span_attributes = fn }
+    assert_equal fn, RailsOtelContext.configuration.custom_span_attributes
+  end
+
+  def test_custom_span_attributes_accepts_proc
+    fn = proc { { 'team' => 'payments' } }
+    RailsOtelContext.configure { |c| c.custom_span_attributes = fn }
+    assert_equal fn, RailsOtelContext.configuration.custom_span_attributes
+  end
+
+  def test_custom_span_attributes_accepts_nil
+    RailsOtelContext.configure { |c| c.custom_span_attributes = nil }
+    assert_nil RailsOtelContext.configuration.custom_span_attributes
+  end
+
+  def test_custom_span_attributes_rejects_non_callable
+    assert_raises(ArgumentError) do
+      RailsOtelContext.configure { |c| c.custom_span_attributes = 'not a callable' }
+    end
+  end
+
+  def test_custom_span_attributes_rejects_hash
+    assert_raises(ArgumentError) do
+      RailsOtelContext.configure { |c| c.custom_span_attributes = { 'team' => 'x' } }
+    end
+  end
+
+  def test_custom_span_attributes_enabled_env_var
+    with_env('RAILS_OTEL_CONTEXT_CUSTOM_SPAN_ATTRIBUTES_ENABLED' => 'false') do
+      config = RailsOtelContext.apply_env_configuration!
+      assert_equal false, config.custom_span_attributes_enabled
+    end
+  end
 end

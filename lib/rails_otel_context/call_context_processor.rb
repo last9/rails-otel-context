@@ -1,7 +1,8 @@
 # frozen_string_literal: true
 
 module RailsOtelContext
-  # SpanProcessor that enriches all spans with the calling Ruby class and method name.
+  # SpanProcessor that enriches all spans with the calling Ruby class and method name,
+  # and optionally with user-defined custom attributes.
   #
   # Sets two attributes on every span (unless the call stack yields no app-code frame):
   #   - code.namespace  – the class name, e.g. "OrderService", "InvoiceJob"
@@ -11,13 +12,33 @@ module RailsOtelContext
   # and inferred from the file-path basename otherwise (e.g. order_service.rb → OrderService).
   #
   # Frames inside gems or outside app_root are always skipped.
+  #
+  # Custom attributes (configured via +custom_span_attributes+) are applied to every span.
+  # The callable must return a Hash (or nil) and must be fast — it runs in the hot path
+  # of every span creation. Exceptions in the callable are silently rescued to avoid
+  # disrupting application request processing.
   class CallContextProcessor
     def initialize(app_root:)
       @app_root = app_root.to_s
     end
 
     def on_start(span, _parent_context)
-      return unless RailsOtelContext.configuration.call_context_enabled
+      config = RailsOtelContext.configuration
+
+      apply_call_context(span) if config.call_context_enabled
+      apply_request_context(span) if config.request_context_enabled
+      apply_custom_attributes(span, config) if config.custom_span_attributes
+    end
+
+    def on_finish(_span); end
+
+    def force_flush(timeout: nil); end
+
+    def shutdown(timeout: nil); end
+
+    private
+
+    def apply_call_context(span)
       return unless Thread.respond_to?(:each_caller_location)
 
       context = extract_caller_context
@@ -31,13 +52,28 @@ module RailsOtelContext
       span.set_attribute('code.lineno', context[:lineno])
     end
 
-    def on_finish(_span); end
+    def apply_request_context(span)
+      controller = RequestContext.controller
+      return unless controller
 
-    def force_flush(timeout: nil); end
+      span.set_attribute('request.controller', controller)
+      action = RequestContext.action
+      span.set_attribute('request.action', action) if action
+    end
 
-    def shutdown(timeout: nil); end
+    def apply_custom_attributes(span, config)
+      return unless config.custom_span_attributes_enabled
 
-    private
+      attrs = config.custom_span_attributes.call
+      return unless attrs.is_a?(Hash) && !attrs.empty?
+
+      attrs.each do |key, value|
+        span.set_attribute(key, value) unless value.nil?
+      end
+    rescue StandardError
+      # Never let a user-supplied callback break span processing.
+      # This runs in the hot path of every request — swallow and move on.
+    end
 
     def extract_caller_context
       Thread.each_caller_location do |location|

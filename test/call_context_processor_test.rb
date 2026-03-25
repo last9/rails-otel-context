@@ -212,6 +212,108 @@ class CallContextProcessorTest < Minitest::Test
   end
 
   # ---------------------------------------------------------------------------
+  # custom_span_attributes
+  # ---------------------------------------------------------------------------
+
+  def test_custom_attributes_applied_to_span
+    RailsOtelContext.configure do |c|
+      c.custom_span_attributes = -> { { 'team' => 'payments', 'domain' => 'checkout' } }
+    end
+    span = FakeSpan.new
+    @processor.on_start(span, nil)
+    assert_equal 'payments', span.attributes['team']
+    assert_equal 'checkout', span.attributes['domain']
+  end
+
+  def test_custom_attributes_nil_return_is_noop
+    RailsOtelContext.configure { |c| c.custom_span_attributes = -> { nil } }
+    span = FakeSpan.new
+    @processor.on_start(span, nil)
+    refute span.attributes.key?('team')
+  end
+
+  def test_custom_attributes_empty_hash_is_noop
+    call_count = 0
+    RailsOtelContext.configure do |c|
+      c.custom_span_attributes = -> { call_count += 1; {} }
+    end
+    span = FakeSpan.new
+    @processor.on_start(span, nil)
+    assert_equal 1, call_count
+    refute span.attributes.key?('team')
+  end
+
+  def test_custom_attributes_skips_nil_values
+    RailsOtelContext.configure do |c|
+      c.custom_span_attributes = -> { { 'team' => 'backend', 'domain' => nil } }
+    end
+    span = FakeSpan.new
+    @processor.on_start(span, nil)
+    assert_equal 'backend', span.attributes['team']
+    refute span.attributes.key?('domain')
+  end
+
+  def test_custom_attributes_exception_is_swallowed
+    RailsOtelContext.configure do |c|
+      c.custom_span_attributes = -> { raise 'boom' }
+    end
+    span = FakeSpan.new
+    # Must not raise — exceptions in user callbacks are silently rescued
+    @processor.on_start(span, nil)
+    refute span.attributes.key?('team')
+  end
+
+  def test_custom_attributes_disabled_via_flag
+    call_count = 0
+    RailsOtelContext.configure do |c|
+      c.custom_span_attributes = -> { call_count += 1; { 'team' => 'backend' } }
+      c.custom_span_attributes_enabled = false
+    end
+    span = FakeSpan.new
+    @processor.on_start(span, nil)
+    assert_equal 0, call_count
+    refute span.attributes.key?('team')
+  end
+
+  def test_custom_attributes_works_with_call_context_disabled
+    RailsOtelContext.configure do |c|
+      c.call_context_enabled = false
+      c.custom_span_attributes = -> { { 'team' => 'platform' } }
+    end
+    span = FakeSpan.new
+    @processor.on_start(span, nil)
+    # call context should not be set
+    refute span.attributes.key?('code.namespace')
+    # custom attributes should still be set
+    assert_equal 'platform', span.attributes['team']
+  end
+
+  def test_custom_attributes_coexist_with_call_context
+    RailsOtelContext.configure do |c|
+      c.custom_span_attributes = -> { { 'team' => 'notifications' } }
+    end
+    span = FakeSpan.new
+    with_caller_location(path: "#{@app_root}/app/models/user.rb", label: 'User.find') do
+      @processor.on_start(span, nil)
+    end
+    assert_equal 'User', span.attributes['code.namespace']
+    assert_equal 'notifications', span.attributes['team']
+  end
+
+  def test_custom_attributes_non_callable_raises_argument_error
+    assert_raises(ArgumentError) do
+      RailsOtelContext.configure { |c| c.custom_span_attributes = { 'team' => 'x' } }
+    end
+  end
+
+  def test_custom_attributes_nil_callable_is_valid
+    RailsOtelContext.configure { |c| c.custom_span_attributes = nil }
+    span = FakeSpan.new
+    @processor.on_start(span, nil)
+    refute span.attributes.key?('team')
+  end
+
+  # ---------------------------------------------------------------------------
   # no-op lifecycle methods
   # ---------------------------------------------------------------------------
 

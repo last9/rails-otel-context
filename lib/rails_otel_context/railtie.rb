@@ -17,9 +17,32 @@ module RailsOtelContext
 
     # Runs after config/initializers/ so the OTel SDK tracer_provider is already configured.
     config.after_initialize do
-      if RailsOtelContext.configuration.call_context_enabled
+      otel_config = RailsOtelContext.configuration
+      needs_processor = otel_config.call_context_enabled ||
+                        otel_config.custom_span_attributes ||
+                        otel_config.request_context_enabled
+
+      if needs_processor
         processor = RailsOtelContext::CallContextProcessor.new(app_root: Rails.root)
         OpenTelemetry.tracer_provider.add_span_processor(processor)
+      end
+    end
+
+    # Install request context capture on ActionController when it loads.
+    # Uses around_action with ensure for leak-proof cleanup on exceptions.
+    initializer 'rails_otel_context.install_request_context' do
+      ActiveSupport.on_load(:action_controller) do
+        if RailsOtelContext.configuration.request_context_enabled
+          around_action do |_controller, block|
+            RailsOtelContext::RequestContext.set(
+              controller: self.class.name,
+              action: action_name
+            )
+            block.call
+          ensure
+            RailsOtelContext::RequestContext.clear!
+          end
+        end
       end
     end
   end

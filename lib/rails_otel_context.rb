@@ -10,6 +10,7 @@ require 'rails_otel_context/version'
 require 'rails_otel_context/configuration'
 require 'rails_otel_context/activerecord_context'
 require 'rails_otel_context/adapters'
+require 'rails_otel_context/request_context'
 require 'rails_otel_context/call_context_processor'
 require 'rails_otel_context/railtie' if defined?(Rails::Railtie)
 
@@ -53,6 +54,12 @@ module RailsOtelContext
 
       config.call_context_enabled =
         bool_env('RAILS_OTEL_CONTEXT_CALL_CONTEXT_ENABLED', config.call_context_enabled)
+
+      config.custom_span_attributes_enabled =
+        bool_env('RAILS_OTEL_CONTEXT_CUSTOM_SPAN_ATTRIBUTES_ENABLED', config.custom_span_attributes_enabled)
+
+      config.request_context_enabled =
+        bool_env('RAILS_OTEL_CONTEXT_REQUEST_CONTEXT_ENABLED', config.request_context_enabled)
 
       config
     end

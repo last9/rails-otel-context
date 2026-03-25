@@ -20,6 +20,10 @@ class FakeSpan
   def set_attribute(key, value)
     @attributes[key] = value
   end
+
+  def add_attributes(hash)
+    @attributes.merge!(hash)
+  end
 end
 
 module EnvHelpers
