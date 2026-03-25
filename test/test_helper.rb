@@ -20,6 +20,10 @@ class FakeSpan
   def set_attribute(key, value)
     @attributes[key] = value
   end
+
+  def add_attributes(hash)
+    @attributes.merge!(hash)
+  end
 end
 
 module EnvHelpers
@@ -34,6 +38,42 @@ module EnvHelpers
   ensure
     previous.each do |key, value|
       value == :__unset__ ? ENV.delete(key) : ENV[key] = value
+    end
+  end
+end
+
+module CallerLocationHelpers
+  def location(path, label, lineno = nil)
+    OpenStruct.new(absolute_path: path, path: path, label: label, lineno: lineno)
+  end
+
+  def with_caller_location(path:, label:, lineno: nil, &block)
+    with_multiple_caller_locations([location(path, label, lineno)], &block)
+  end
+
+  def with_multiple_caller_locations(locations)
+    thread_singleton = Thread.singleton_class
+    had_original = Thread.respond_to?(:each_caller_location)
+
+    if had_original
+      thread_singleton.class_eval do
+        alias_method :__rails_otel_ctx_original_ecl, :each_caller_location
+      end
+    end
+
+    thread_singleton.define_method(:each_caller_location) do |&blk|
+      locations.each { |loc| blk.call(loc) }
+    end
+
+    yield
+  ensure
+    if had_original
+      thread_singleton.class_eval do
+        alias_method :each_caller_location, :__rails_otel_ctx_original_ecl
+        remove_method :__rails_otel_ctx_original_ecl
+      end
+    else
+      thread_singleton.class_eval { remove_method :each_caller_location }
     end
   end
 end
