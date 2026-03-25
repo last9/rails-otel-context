@@ -11,7 +11,8 @@ module RailsOtelContext
                   :redis_source_enabled,
                   :clickhouse_enabled,
                   :clickhouse_slow_query_threshold_ms,
-                  :span_name_formatter
+                  :span_name_formatter,
+                  :call_context_enabled
 
     def initialize
       @pg_slow_query_enabled = true
@@ -24,6 +25,7 @@ module RailsOtelContext
       @clickhouse_enabled = true
       @clickhouse_slow_query_threshold_ms = 200.0
       @span_name_formatter = nil
+      @call_context_enabled = true
     end
   end
 end
