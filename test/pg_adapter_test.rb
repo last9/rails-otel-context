@@ -12,6 +12,7 @@ class PgAdapterTest < Minitest::Test
 
   def test_patch_sets_code_location_attributes_for_slow_queries
     patch = RailsOtelContext::Adapters::PG.send(:build_patch_module, [:exec])
+    RailsOtelContext.configure { |c| c.pg_slow_query_threshold_ms = 0.0 }
     patch.configure(app_root: Dir.pwd, threshold_ms: 0.0)
 
     host_class = new_host_class
@@ -31,6 +32,7 @@ class PgAdapterTest < Minitest::Test
 
   def test_patch_skips_attributes_for_fast_queries
     patch = RailsOtelContext::Adapters::PG.send(:build_patch_module, [:exec])
+    RailsOtelContext.configure { |c| c.pg_slow_query_threshold_ms = 999_999.0 }
     patch.configure(app_root: Dir.pwd, threshold_ms: 999_999.0)
 
     host_class = new_host_class
@@ -48,6 +50,7 @@ class PgAdapterTest < Minitest::Test
 
   def test_patch_sets_activerecord_context_for_slow_queries
     patch = RailsOtelContext::Adapters::PG.send(:build_patch_module, [:exec])
+    RailsOtelContext.configure { |c| c.pg_slow_query_threshold_ms = 0.0 }
     patch.configure(app_root: Dir.pwd, threshold_ms: 0.0)
 
     host_class = new_host_class
@@ -67,6 +70,7 @@ class PgAdapterTest < Minitest::Test
 
   def test_patch_skips_activerecord_context_for_fast_queries
     patch = RailsOtelContext::Adapters::PG.send(:build_patch_module, [:exec])
+    RailsOtelContext.configure { |c| c.pg_slow_query_threshold_ms = 999_999.0 }
     patch.configure(app_root: Dir.pwd, threshold_ms: 999_999.0)
 
     host_class = new_host_class
@@ -90,6 +94,7 @@ class PgAdapterTest < Minitest::Test
 
   def test_span_name_formatter_renames_span_when_ar_context_present
     patch = RailsOtelContext::Adapters::PG.send(:build_patch_module, [:exec])
+    RailsOtelContext.configure { |c| c.pg_slow_query_threshold_ms = 0.0 }
     patch.configure(app_root: Dir.pwd, threshold_ms: 0.0)
 
     host_class = new_host_class
@@ -114,6 +119,7 @@ class PgAdapterTest < Minitest::Test
 
   def test_span_name_formatter_error_does_not_propagate
     patch = RailsOtelContext::Adapters::PG.send(:build_patch_module, [:exec])
+    RailsOtelContext.configure { |c| c.pg_slow_query_threshold_ms = 0.0 }
     patch.configure(app_root: Dir.pwd, threshold_ms: 0.0)
 
     host_class = new_host_class
@@ -138,6 +144,7 @@ class PgAdapterTest < Minitest::Test
 
   def test_patch_skips_all_attributes_when_source_is_nil
     patch = RailsOtelContext::Adapters::PG.send(:build_patch_module, [:exec])
+    RailsOtelContext.configure { |c| c.pg_slow_query_threshold_ms = 0.0 }
     patch.configure(app_root: '/unlikely/root', threshold_ms: 0.0)
 
     host_class = new_host_class
@@ -154,6 +161,7 @@ class PgAdapterTest < Minitest::Test
 
   def test_user_block_is_forwarded_to_result
     patch = RailsOtelContext::Adapters::PG.send(:build_patch_module, [:exec])
+    RailsOtelContext.configure { |c| c.pg_slow_query_threshold_ms = 999_999.0 }
     patch.configure(app_root: Dir.pwd, threshold_ms: 999_999.0)
 
     host_class = new_host_class

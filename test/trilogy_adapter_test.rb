@@ -9,10 +9,12 @@ class TrilogyAdapterTest < Minitest::Test
   ValidContext = Struct.new(:valid?)
 
   def setup
+    RailsOtelContext.reset_configuration!
     RailsOtelContext::Adapters::Trilogy.instance_variable_set(:@patch_module, nil)
   end
 
   def test_query_sets_source_attributes_for_slow_queries
+    RailsOtelContext.configure { |c| c.trilogy_slow_query_threshold_ms = 0.0 }
     patch = RailsOtelContext::Adapters::Trilogy.send(:build_patch_module)
     patch.configure(app_root: Dir.pwd, threshold_ms: 0.0)
 
@@ -33,6 +35,7 @@ class TrilogyAdapterTest < Minitest::Test
   end
 
   def test_query_skips_attributes_for_fast_queries
+    RailsOtelContext.configure { |c| c.trilogy_slow_query_threshold_ms = 999_999.0 }
     patch = RailsOtelContext::Adapters::Trilogy.send(:build_patch_module)
     patch.configure(app_root: Dir.pwd, threshold_ms: 999_999.0)
 
@@ -51,6 +54,7 @@ class TrilogyAdapterTest < Minitest::Test
 
   def test_query_sets_activerecord_context
     patch = RailsOtelContext::Adapters::Trilogy.send(:build_patch_module)
+    RailsOtelContext.configure { |c| c.trilogy_slow_query_threshold_ms = 0.0 }
     patch.configure(app_root: Dir.pwd, threshold_ms: 0.0)
 
     client_class = new_client_class
@@ -70,6 +74,7 @@ class TrilogyAdapterTest < Minitest::Test
 
   def test_query_applies_span_name_formatter
     patch = RailsOtelContext::Adapters::Trilogy.send(:build_patch_module)
+    RailsOtelContext.configure { |c| c.trilogy_slow_query_threshold_ms = 0.0 }
     patch.configure(app_root: Dir.pwd, threshold_ms: 0.0)
 
     client_class = new_client_class
@@ -98,6 +103,7 @@ class TrilogyAdapterTest < Minitest::Test
 
   def test_query_skips_when_span_context_invalid
     patch = RailsOtelContext::Adapters::Trilogy.send(:build_patch_module)
+    RailsOtelContext.configure { |c| c.trilogy_slow_query_threshold_ms = 0.0 }
     patch.configure(app_root: Dir.pwd, threshold_ms: 0.0)
 
     client_class = new_client_class
@@ -115,6 +121,7 @@ class TrilogyAdapterTest < Minitest::Test
 
   def test_query_skips_source_attributes_when_no_source_location
     patch = RailsOtelContext::Adapters::Trilogy.send(:build_patch_module)
+    RailsOtelContext.configure { |c| c.trilogy_slow_query_threshold_ms = 0.0 }
     patch.configure(app_root: Dir.pwd, threshold_ms: 0.0)
 
     client_class = new_client_class
@@ -146,6 +153,7 @@ class TrilogyAdapterTest < Minitest::Test
     Object.const_set(:Trilogy, stub_trilogy)
 
     patch = RailsOtelContext::Adapters::Trilogy.patch_module_for
+    RailsOtelContext.configure { |c| c.trilogy_slow_query_threshold_ms = 200.0 }
     patch.configure(app_root: Dir.pwd, threshold_ms: 200.0)
 
     # Install once

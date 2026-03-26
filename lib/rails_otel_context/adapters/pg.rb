@@ -70,13 +70,14 @@ module RailsOtelContext
 
                 span = OpenTelemetry::Trace.current_span
 
+                config = RailsOtelContext.configuration
+
                 # Rename span if formatter is configured and AR context is available
-                if ar_context && RailsOtelContext.configuration.span_name_formatter
+                if ar_context && config.span_name_formatter
                   begin
-                    new_name = RailsOtelContext.configuration.span_name_formatter.call(span.name, ar_context)
+                    new_name = config.span_name_formatter.call(span.name, ar_context)
                     span.update_name(new_name) if new_name && new_name != span.name
                   rescue StandardError => e
-                    # Don't let formatter errors break the application
                     warn "[RailsOtelContext] Span name formatter error: #{e.message}"
                   end
                 end
@@ -87,12 +88,13 @@ module RailsOtelContext
                   span.set_attribute('code.activerecord.method', ar_context[:method_name]) if ar_context[:method_name]
                 end
 
-                # Source location and timing only for slow queries
-                if source && duration_ms >= mod.threshold_ms
+                # Source location and timing only for slow queries (read threshold at query time)
+                threshold = config.pg_slow_query_threshold_ms
+                if source && duration_ms >= threshold
                   span.set_attribute('code.filepath', source[0])
                   span.set_attribute('code.lineno', source[1])
                   span.set_attribute('db.query.duration_ms', duration_ms.round(1))
-                  span.set_attribute('db.query.slow_threshold_ms', mod.threshold_ms)
+                  span.set_attribute('db.query.slow_threshold_ms', threshold)
                 end
 
                 user_block ? user_block.call(result) : result

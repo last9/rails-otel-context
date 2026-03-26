@@ -9,11 +9,13 @@ class Mysql2AdapterTest < Minitest::Test
   ValidContext = Struct.new(:valid?)
 
   def setup
+    RailsOtelContext.reset_configuration!
     RailsOtelContext::Adapters::Mysql2.instance_variable_set(:@patch_module, nil)
   end
 
   def test_query_sets_source_attributes_for_slow_queries
     patch = RailsOtelContext::Adapters::Mysql2.send(:build_patch_module)
+    RailsOtelContext.configure { |c| c.mysql2_slow_query_threshold_ms = 0.0 }
     patch.configure(app_root: Dir.pwd, threshold_ms: 0.0)
 
     client_class = new_client_class
@@ -34,6 +36,7 @@ class Mysql2AdapterTest < Minitest::Test
 
   def test_prepare_sets_source_attributes_for_slow_queries
     patch = RailsOtelContext::Adapters::Mysql2.send(:build_patch_module)
+    RailsOtelContext.configure { |c| c.mysql2_slow_query_threshold_ms = 0.0 }
     patch.configure(app_root: Dir.pwd, threshold_ms: 0.0)
 
     client_class = new_client_class
@@ -52,6 +55,7 @@ class Mysql2AdapterTest < Minitest::Test
 
   def test_query_skips_attributes_for_fast_queries
     patch = RailsOtelContext::Adapters::Mysql2.send(:build_patch_module)
+    RailsOtelContext.configure { |c| c.mysql2_slow_query_threshold_ms = 999_999.0 }
     patch.configure(app_root: Dir.pwd, threshold_ms: 999_999.0)
 
     client_class = new_client_class
@@ -69,6 +73,7 @@ class Mysql2AdapterTest < Minitest::Test
 
   def test_query_skips_all_attributes_when_span_context_invalid
     patch = RailsOtelContext::Adapters::Mysql2.send(:build_patch_module)
+    RailsOtelContext.configure { |c| c.mysql2_slow_query_threshold_ms = 0.0 }
     patch.configure(app_root: Dir.pwd, threshold_ms: 0.0)
 
     client_class = new_client_class
@@ -99,6 +104,7 @@ class Mysql2AdapterTest < Minitest::Test
 
   def test_query_sets_activerecord_context_for_slow_queries
     patch = RailsOtelContext::Adapters::Mysql2.send(:build_patch_module)
+    RailsOtelContext.configure { |c| c.mysql2_slow_query_threshold_ms = 0.0 }
     patch.configure(app_root: Dir.pwd, threshold_ms: 0.0)
 
     client_class = new_client_class
@@ -118,6 +124,7 @@ class Mysql2AdapterTest < Minitest::Test
 
   def test_prepare_sets_activerecord_context_for_slow_queries
     patch = RailsOtelContext::Adapters::Mysql2.send(:build_patch_module)
+    RailsOtelContext.configure { |c| c.mysql2_slow_query_threshold_ms = 0.0 }
     patch.configure(app_root: Dir.pwd, threshold_ms: 0.0)
 
     client_class = new_client_class
