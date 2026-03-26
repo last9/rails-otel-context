@@ -33,28 +33,14 @@ module RailsOtelContext
       def build_patch_module(methods)
         mod = Module.new do
           class << self
+            include RailsOtelContext::SourceLocation
+
             attr_accessor :app_root, :threshold_ms
 
             def configure(app_root:, threshold_ms:)
               @app_root = app_root.to_s
               @threshold_ms = threshold_ms.to_f
             end
-
-            def source_location_for_app
-              return unless Thread.respond_to?(:each_caller_location)
-
-              Thread.each_caller_location do |location|
-                path = location.absolute_path || location.path
-                next unless path&.start_with?(app_root)
-                next if path.include?('/gems/')
-
-                return [path.delete_prefix("#{app_root}/"), location.lineno]
-              end
-
-              nil
-            end
-
-            # AR context is now handled by CallContextProcessor via sql.active_record notification
           end
 
           # AR context and span renaming handled by CallContextProcessor.apply_db_context.

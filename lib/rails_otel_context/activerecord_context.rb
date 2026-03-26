@@ -15,6 +15,7 @@ module RailsOtelContext
   module ActiveRecordContext
     THREAD_KEY       = :_rails_otel_ctx_ar
     SCOPE_THREAD_KEY = :_rails_otel_ctx_scope
+    private_constant :THREAD_KEY, :SCOPE_THREAD_KEY
 
     # Subscriber for sql.active_record notifications.
     class Subscriber
@@ -42,6 +43,10 @@ module RailsOtelContext
       def scope(name, body, &)
         super
 
+        # Guard against double-wrapping on class reload in development
+        @_otel_wrapped_scopes ||= {}
+        return if @_otel_wrapped_scopes[name]
+
         name_str = name.to_s.freeze
         original = method(name)
         define_singleton_method(name) do |*args|
@@ -51,6 +56,7 @@ module RailsOtelContext
           end
           relation
         end
+        @_otel_wrapped_scopes[name] = true
       end
     end
 
@@ -79,6 +85,21 @@ module RailsOtelContext
     def current
       Thread.current[THREAD_KEY]
     end
+
+    def clear!
+      Thread.current[THREAD_KEY] = nil
+      Thread.current[SCOPE_THREAD_KEY] = nil
+    end
+
+    # Test helpers: set AR context directly for unit tests.
+    def stub_context(context)
+      Thread.current[THREAD_KEY] = context
+    end
+
+    def stub_scope(scope_name)
+      Thread.current[SCOPE_THREAD_KEY] = scope_name
+    end
+    private :stub_scope
 
     # Parses "Transaction Load" → { model_name: "Transaction", method_name: "Load" }
     def parse_ar_name(name)
