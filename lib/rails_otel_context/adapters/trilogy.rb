@@ -50,33 +50,36 @@ module RailsOtelContext
           end
 
           define_method(:query) do |sql|
-            source = mod.source_location_for_app
             ar_context = mod.activerecord_context
+            source = mod.source_location_for_app
+
+            # Store AR context in thread-local for the CallContextProcessor's
+            # on_start hook, which fires when OTel creates the DB span inside super.
+            Thread.current[:_rails_otel_ctx_ar] = ar_context
+            Thread.current[:_rails_otel_ctx_src] = source
+
             started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
             result = super(sql)
             duration_ms = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - started_at) * 1000.0
 
+            # Also try to apply directly (works when prepend order is correct)
             span = OpenTelemetry::Trace.current_span
             if span.context.valid?
               config = RailsOtelContext.configuration
 
-              # Rename span if formatter is configured and AR context is available
               if ar_context && config.span_name_formatter
                 begin
                   new_name = config.span_name_formatter.call(span.name, ar_context)
                   span.update_name(new_name) if new_name && new_name != span.name
-                rescue StandardError => e
-                  warn "[RailsOtelContext] Span name formatter error: #{e.message}"
+                rescue StandardError
                 end
               end
 
-              # Always set AR context — useful for filtering by model regardless of query speed
               if ar_context
                 span.set_attribute('code.activerecord.model', ar_context[:model_name]) if ar_context[:model_name]
                 span.set_attribute('code.activerecord.method', ar_context[:method_name]) if ar_context[:method_name]
               end
 
-              # Source location and timing only for slow queries (read threshold at query time)
               threshold = config.trilogy_slow_query_threshold_ms
               if source && duration_ms >= threshold
                 span.set_attribute('code.filepath', source[0])
@@ -87,6 +90,9 @@ module RailsOtelContext
             end
 
             result
+          ensure
+            Thread.current[:_rails_otel_ctx_ar] = nil
+            Thread.current[:_rails_otel_ctx_src] = nil
           end
         end
 

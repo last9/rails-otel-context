@@ -33,6 +33,7 @@ module RailsOtelContext
     def on_start(span, _parent_context)
       apply_call_context(span) if @call_context_enabled
       apply_request_context(span) if @request_context_enabled
+      apply_db_context(span)
       apply_custom_attributes(span) if @custom_span_attributes
     end
 
@@ -64,6 +65,24 @@ module RailsOtelContext
 
       span.set_attribute(SPAN_CONTROLLER_ATTR, controller)
       span.set_attribute(SPAN_ACTION_ATTR, action) if action
+    end
+
+    def apply_db_context(span)
+      ar_context = ActiveRecordContext.current
+      return unless ar_context
+
+      span.set_attribute('code.activerecord.model', ar_context[:model_name]) if ar_context[:model_name]
+      span.set_attribute('code.activerecord.method', ar_context[:method_name]) if ar_context[:method_name]
+
+      config = RailsOtelContext.configuration
+      if config.span_name_formatter
+        begin
+          new_name = config.span_name_formatter.call(span.name, ar_context)
+          span.update_name(new_name) if new_name && new_name != span.name
+        rescue StandardError
+          # Don't let formatter errors break span processing
+        end
+      end
     end
 
     def apply_custom_attributes(span)
