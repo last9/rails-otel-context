@@ -22,7 +22,7 @@ module RailsOtelContext
                         otel_config.custom_span_attributes ||
                         otel_config.request_context_enabled
 
-      if needs_processor
+      if needs_processor && OpenTelemetry.tracer_provider.respond_to?(:add_span_processor)
         processor = RailsOtelContext::CallContextProcessor.new(app_root: Rails.root)
         OpenTelemetry.tracer_provider.add_span_processor(processor)
       end
