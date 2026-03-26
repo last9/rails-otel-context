@@ -52,5 +52,4 @@ Gemfile.lock
 .env.*.local
 
 # Claude Code
-.claude/settings.local.json
-.claude/settings.json
+.claude/
