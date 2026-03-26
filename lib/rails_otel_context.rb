@@ -8,6 +8,7 @@ end
 
 require 'rails_otel_context/version'
 require 'rails_otel_context/configuration'
+require 'rails_otel_context/source_location'
 require 'rails_otel_context/activerecord_context'
 require 'rails_otel_context/adapters'
 require 'rails_otel_context/request_context'

@@ -4,11 +4,11 @@ require_relative 'test_helper'
 
 class ActiveRecordContextTest < Minitest::Test
   def setup
-    Thread.current[RailsOtelContext::ActiveRecordContext::THREAD_KEY] = nil
+    RailsOtelContext::ActiveRecordContext.clear!
   end
 
   def teardown
-    Thread.current[RailsOtelContext::ActiveRecordContext::THREAD_KEY] = nil
+    RailsOtelContext::ActiveRecordContext.clear!
   end
 
   # parse_ar_name
@@ -73,7 +73,7 @@ class ActiveRecordContextTest < Minitest::Test
   # Scope tracking via thread-local
 
   def test_subscriber_includes_scope_name_from_thread_local
-    Thread.current[RailsOtelContext::ActiveRecordContext::SCOPE_THREAD_KEY] = 'recent_completed'
+    RailsOtelContext::ActiveRecordContext.send(:stub_scope, 'recent_completed')
     sub = RailsOtelContext::ActiveRecordContext::Subscriber.new
     sub.start('sql.active_record', '1', { name: 'Transaction Load' })
 
@@ -82,7 +82,7 @@ class ActiveRecordContextTest < Minitest::Test
     assert_equal 'Load', ctx[:method_name]
     assert_equal 'recent_completed', ctx[:scope_name]
   ensure
-    Thread.current[RailsOtelContext::ActiveRecordContext::SCOPE_THREAD_KEY] = nil
+    RailsOtelContext::ActiveRecordContext.clear!
   end
 
   def test_subscriber_no_scope_when_thread_local_empty
@@ -96,7 +96,7 @@ class ActiveRecordContextTest < Minitest::Test
   # Legacy extract
 
   def test_extract_returns_current
-    Thread.current[RailsOtelContext::ActiveRecordContext::THREAD_KEY] = { model_name: 'Order', method_name: 'Create' }
+    RailsOtelContext::ActiveRecordContext.stub_context(model_name: 'Order', method_name: 'Create')
     ctx = RailsOtelContext::ActiveRecordContext.extract(app_root: '/app')
     assert_equal 'Order', ctx[:model_name]
   end
