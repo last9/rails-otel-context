@@ -5,95 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.5.0] - 2026-03-27
 
 ### Added
-- Initial release of rails-otel-context gem
-- Source code location tracking for database queries
-- ActiveRecord model and method context extraction
-- PostgreSQL adapter enhancements (pg gem)
-- MySQL2 adapter enhancements
+- **Custom span attributes** (`custom_span_attributes`) — propagate request-scoped attributes (team, tenant, domain) to every span in a trace via a lambda callback
+- **Request context propagation** (`request_context_enabled`) — automatically propagate `request.controller` and `request.action` to all child spans
+- **ActiveRecord scope tracking** — capture scope names (e.g., `recent_completed`, `by_status`) on lazy relation queries via `code.activerecord.scope` attribute
+- **Notification-based AR context** — use `sql.active_record` notification subscriber (same approach as Datadog/Scout APM) instead of stack-walking for reliable model name extraction
+- **Span name formatter** receives `scope_name`, `code_namespace`, `code_function` in `ar_context` for intelligent span renaming
+- **Original span name preservation** — `l9.orig.name` attribute stores the original span name when the formatter renames it
+- **Trilogy adapter** support for MySQL-compatible databases
+- **ProxyTracerProvider guard** — gracefully skip processor registration when OTel SDK is not configured (e.g., behind `ENABLE_OTLP` env var)
+- **Environment variable kill switches** — `RAILS_OTEL_CONTEXT_CUSTOM_SPAN_ATTRIBUTES_ENABLED` and `RAILS_OTEL_CONTEXT_REQUEST_CONTEXT_ENABLED` for instant rollback without redeploy
+- Thread-local `RequestContext` with leak-proof `around_action` cleanup
+- 98 tests across 9 test files
+
+### Changed
+- **AR model attributes always set** — `code.activerecord.model` and `code.activerecord.method` are now set on every DB span regardless of query speed (previously gated behind slow query threshold)
+- **Config read at query time** — slow query thresholds are read from config at query execution time, not captured at adapter install time (fixes load-order issues with Rails initializers)
+- **Span rename uses `name=`** instead of `update_name` (correct OTel Ruby SDK API)
+- Extracted `SourceLocation` into shared module (was duplicated across all adapters)
+- Attribute name constants: `AR_MODEL_ATTR`, `AR_METHOD_ATTR`, `AR_SCOPE_ATTR`, `ORIG_NAME_ATTR`
+- Thread-local keys are now private constants with `stub_context`/`clear!` test helpers
+- `ScopeNameTracking` guards against double-wrap on class reload in development
+
+### Fixed
+- `NoMethodError` when OTel SDK not configured (`ProxyTracerProvider` lacks `add_span_processor`)
+- `ActiveRecordContext.extract` returning nil in real Rails apps (stack-walking couldn't find model names through AR gem internals)
+- Load-order bug where user's `trilogy_slow_query_threshold_ms = 0.0` was ignored because adapter captured default 200ms at install time
+
+## [0.1.0] - 2026-03-25
+
+### Added
+- Initial release
+- Source code location tracking for database queries (PG, MySQL2, ClickHouse)
+- ActiveRecord model and method context extraction via stack-walking
 - Redis source location tracking (opt-in)
 - ClickHouse instrumentation (creates spans where none exist)
+- Caller context processor (`code.namespace`, `code.function`, `code.lineno` on all spans)
 - Configurable slow query thresholds per adapter
 - Environment variable configuration support
 - Zero-config Rails integration via Railtie
-- Comprehensive documentation with examples
-- Full test suite with 20 tests
-
-### Features
-
-#### Source Location Tracking
-- Captures exact file path and line number where slow queries originate
-- Filters to show only application code (excludes gem internals)
-- Relative paths from Rails.root for cleaner output
-
-#### ActiveRecord Context
-- Extracts ActiveRecord model name from call stack
-- Identifies method name that triggered the query
-- Helps pinpoint exact AR calls causing slow queries
-
-#### Span Attributes
-- `code.filepath` - Application file path (relative to Rails.root)
-- `code.lineno` - Line number where query originated
-- `code.activerecord.model` - ActiveRecord model name (e.g., "User")
-- `code.activerecord.method` - Method that triggered query (e.g., "find")
-- `db.query.duration_ms` - Precise query duration in milliseconds
-- `db.query.slow_threshold_ms` - Configured threshold value
-
-#### Adapters
-
-**PostgreSQL (pg)**
-- Enhances official `opentelemetry-instrumentation-pg`
-- Patches all exec-family methods
-- Default threshold: 200ms
-
-**MySQL2**
-- Patches `query` and `prepare` methods
-- Validates span context before setting attributes
-- Default threshold: 200ms
-
-**Redis**
-- Patches `RedisClient::Middlewares`
-- Supports both single and pipelined commands
-- Disabled by default (opt-in via configuration)
-
-**ClickHouse**
-- Creates spans where no official instrumentation exists
-- Supports multiple client gem variants
-- Patches: query, select, insert, execute, command
-- Default threshold: 200ms
-
-### Configuration
-
-#### Environment Variables
-- `RAILS_OTEL_CONTEXT_PG_SLOW_QUERY_ENABLED` (default: true)
-- `RAILS_OTEL_CONTEXT_PG_SLOW_QUERY_MS` (default: 200.0)
-- `RAILS_OTEL_CONTEXT_MYSQL2_SLOW_QUERY_ENABLED` (default: true)
-- `RAILS_OTEL_CONTEXT_MYSQL2_SLOW_QUERY_MS` (default: 200.0)
-- `RAILS_OTEL_CONTEXT_REDIS_SOURCE_ENABLED` (default: false)
-- `RAILS_OTEL_CONTEXT_CLICKHOUSE_ENABLED` (default: true)
-- `RAILS_OTEL_CONTEXT_CLICKHOUSE_SLOW_QUERY_MS` (default: 200.0)
-
-#### Ruby Configuration API
-```ruby
-RailsOtelContext.configure do |c|
-  c.pg_slow_query_enabled = true
-  c.pg_slow_query_threshold_ms = 200.0
-  # ... etc
-end
-```
-
-### Requirements
-- Ruby >= 3.1.0 (for `Thread.each_caller_location`)
-- Rails >= 7.0
-- OpenTelemetry SDK and instrumentations
-
-### Dependencies
-- `opentelemetry-api` >= 1.0
-- `railties` >= 7.0
-- `activerecord` >= 7.0
-
-## [0.1.0] - TBD
-
-Initial release (unreleased)
+- Span name formatter for customizing DB span names
