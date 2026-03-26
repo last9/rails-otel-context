@@ -71,20 +71,36 @@ module RailsOtelContext
       ar_context = ActiveRecordContext.current
       return unless ar_context
 
+      enrich_ar_context(span, ar_context)
+      set_ar_attributes(span, ar_context)
+      apply_span_name_formatter(span, ar_context)
+    rescue StandardError
+      # Never let AR context or formatter errors break span processing
+    end
+
+    def enrich_ar_context(span, ar_context)
+      return unless span.respond_to?(:attributes)
+
+      ar_context[:code_namespace] = span.attributes['code.namespace']
+      ar_context[:code_function] = span.attributes['code.function']
+    end
+
+    def set_ar_attributes(span, ar_context)
       span.set_attribute('code.activerecord.model', ar_context[:model_name]) if ar_context[:model_name]
       span.set_attribute('code.activerecord.method', ar_context[:method_name]) if ar_context[:method_name]
+      span.set_attribute('code.activerecord.scope', ar_context[:scope_name]) if ar_context[:scope_name]
+    end
 
-      config = RailsOtelContext.configuration
-      return unless config.span_name_formatter
+    def apply_span_name_formatter(span, ar_context)
+      formatter = RailsOtelContext.configuration.span_name_formatter
+      return unless formatter
 
       original_name = span.name
-      new_name = config.span_name_formatter.call(original_name, ar_context)
+      new_name = formatter.call(original_name, ar_context)
       return unless new_name && new_name != original_name && span.respond_to?(:name=)
 
       span.set_attribute('l9.orig.name', original_name)
       span.name = new_name
-    rescue StandardError
-      # Don't let formatter errors break span processing
     end
 
     def apply_custom_attributes(span)

@@ -1,21 +1,22 @@
 # frozen_string_literal: true
 
 module RailsOtelContext
-  # Extracts ActiveRecord model name and method from sql.active_record
-  # notifications using a subscriber object with start/finish callbacks.
+  # Extracts ActiveRecord model name, method, and scope from sql.active_record
+  # notifications and scope instrumentation.
   #
-  # The start callback fires BEFORE the query executes, setting the AR context
-  # in a thread-local. The CallContextProcessor reads it when OTel creates
-  # the DB CLIENT span (which happens during query execution, between start
-  # and finish). The finish callback clears the context.
-  #
-  # This approach matches how Datadog, Scout APM, and OTel's own ActiveRecord
-  # instrumentation extract model names — via payload[:name] which Rails sets
-  # to strings like "Transaction Load", "User Count", "Order Create".
+  # Two mechanisms work together:
+  # 1. sql.active_record subscriber — captures model name + AR operation type
+  #    (e.g., "Transaction Load") at query time via payload[:name].
+  # 2. Scope tracking — wraps scope-generated methods to store the scope name
+  #    on the Relation object, then captures it at materialization time via
+  #    Relation#exec_queries. This handles lazy scopes like
+  #    Transaction.recent_completed.to_a where the scope method returns before
+  #    SQL fires.
   module ActiveRecordContext
-    THREAD_KEY = :_rails_otel_ctx_ar
+    THREAD_KEY       = :_rails_otel_ctx_ar
+    SCOPE_THREAD_KEY = :_rails_otel_ctx_scope
 
-    # Subscriber object with start/finish methods for ActiveSupport::Notifications.
+    # Subscriber for sql.active_record notifications.
     class Subscriber
       def start(_name, _id, payload)
         ar_name = payload[:name]
@@ -23,11 +24,43 @@ module RailsOtelContext
         return if ar_name == 'SCHEMA' || ar_name.start_with?('CACHE') || ar_name == 'SQL'
 
         ctx = ActiveRecordContext.parse_ar_name(ar_name)
-        Thread.current[THREAD_KEY] = ctx if ctx
+        return unless ctx
+
+        # Include scope name if one was captured by RelationScopeCapture
+        scope = Thread.current[SCOPE_THREAD_KEY]
+        ctx[:scope_name] = scope if scope
+        Thread.current[THREAD_KEY] = ctx
       end
 
       def finish(_name, _id, _payload)
         Thread.current[THREAD_KEY] = nil
+      end
+    end
+
+    # Wraps scope-generated class methods to store the scope name on the Relation.
+    module ScopeNameTracking
+      def scope(name, body, &)
+        super
+
+        original = method(name)
+        define_singleton_method(name) do |*args|
+          relation = original.call(*args)
+          if relation.is_a?(::ActiveRecord::Relation)
+            relation.instance_variable_set(:@_otel_scope_name, name.to_s)
+          end
+          relation
+        end
+      end
+    end
+
+    # Captures scope name from Relation at SQL materialization time.
+    module RelationScopeCapture
+      def exec_queries(&)
+        scope_name = instance_variable_get(:@_otel_scope_name)
+        Thread.current[SCOPE_THREAD_KEY] = scope_name if scope_name
+        super
+      ensure
+        Thread.current[SCOPE_THREAD_KEY] = nil
       end
     end
 
@@ -38,9 +71,10 @@ module RailsOtelContext
       return unless defined?(::ActiveRecord::Base)
 
       ActiveSupport::Notifications.subscribe('sql.active_record', Subscriber.new)
+      ::ActiveRecord::Base.extend(ScopeNameTracking)
+      ::ActiveRecord::Relation.prepend(RelationScopeCapture)
     end
 
-    # Returns the current AR context from thread-local.
     def current
       Thread.current[THREAD_KEY]
     end
