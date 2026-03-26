@@ -71,7 +71,7 @@ module RailsOtelContext
                 begin
                   new_name = config.span_name_formatter.call(span.name, ar_context)
                   span.name = new_name if new_name && new_name != span.name && span.respond_to?(:name=)
-                rescue StandardError
+                rescue StandardError # rubocop:disable Lint/SuppressedException
                 end
               end
 

@@ -75,18 +75,16 @@ module RailsOtelContext
       span.set_attribute('code.activerecord.method', ar_context[:method_name]) if ar_context[:method_name]
 
       config = RailsOtelContext.configuration
-      if config.span_name_formatter
-        begin
-          original_name = span.name
-          new_name = config.span_name_formatter.call(original_name, ar_context)
-          if new_name && new_name != original_name && span.respond_to?(:name=)
-            span.set_attribute('l9.orig.name', original_name)
-            span.name = new_name
-          end
-        rescue StandardError
-          # Don't let formatter errors break span processing
-        end
-      end
+      return unless config.span_name_formatter
+
+      original_name = span.name
+      new_name = config.span_name_formatter.call(original_name, ar_context)
+      return unless new_name && new_name != original_name && span.respond_to?(:name=)
+
+      span.set_attribute('l9.orig.name', original_name)
+      span.name = new_name
+    rescue StandardError
+      # Don't let formatter errors break span processing
     end
 
     def apply_custom_attributes(span)

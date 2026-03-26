@@ -61,7 +61,7 @@ module RailsOtelContext
     end
 
     # Legacy method for adapter tests.
-    def extract(app_root:)
+    def extract(app_root: nil) # rubocop:disable Lint/UnusedMethodArgument
       current
     end
   end
