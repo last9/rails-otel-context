@@ -88,12 +88,12 @@ class TrilogyAdapterTest < Minitest::Test
     with_thread_source('/app/models/user.rb', 10) do
       with_current_span_with_valid_context do |span|
         span.define_singleton_method(:name) { 'SELECT users' }
-        span.define_singleton_method(:update_name) { |n| @updated_name = n }
-        span.define_singleton_method(:updated_name) { @updated_name }
+        span.define_singleton_method(:name=) { |n| @custom_name = n }
+        span.define_singleton_method(:custom_name) { @custom_name }
 
         with_activerecord_context(model_name: 'User', method_name: 'find') do
           client.query('SELECT * FROM users')
-          assert_equal 'User.find', span.updated_name
+          assert_equal 'User.find', span.custom_name
         end
       end
     end

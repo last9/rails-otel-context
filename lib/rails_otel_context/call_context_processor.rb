@@ -78,7 +78,9 @@ module RailsOtelContext
       if config.span_name_formatter
         begin
           new_name = config.span_name_formatter.call(span.name, ar_context)
-          span.update_name(new_name) if new_name && new_name != span.name
+          if new_name && new_name != span.name
+            span.name = new_name if span.respond_to?(:name=)
+          end
         rescue StandardError
           # Don't let formatter errors break span processing
         end

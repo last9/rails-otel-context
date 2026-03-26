@@ -204,7 +204,7 @@ class PgAdapterTest < Minitest::Test
     fake_span = FakeSpan.new
     fake_span.instance_variable_set(:@name, initial_name)
     fake_span.define_singleton_method(:name) { @name }
-    fake_span.define_singleton_method(:update_name) { |n| @name = n }
+    fake_span.define_singleton_method(:name=) { |n| @name = n }
 
     singleton = OpenTelemetry::Trace.singleton_class
     singleton.class_eval do

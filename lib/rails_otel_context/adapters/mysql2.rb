@@ -63,7 +63,7 @@ module RailsOtelContext
               if ar_context && config.span_name_formatter
                 begin
                   new_name = config.span_name_formatter.call(span.name, ar_context)
-                  span.update_name(new_name) if new_name && new_name != span.name
+                  span.name = new_name if new_name && new_name != span.name && span.respond_to?(:name=)
                 rescue StandardError => e
                   warn "[RailsOtelContext] Span name formatter error: #{e.message}"
                 end
@@ -102,7 +102,7 @@ module RailsOtelContext
               if ar_context && config.span_name_formatter
                 begin
                   new_name = config.span_name_formatter.call(span.name, ar_context)
-                  span.update_name(new_name) if new_name && new_name != span.name
+                  span.name = new_name if new_name && new_name != span.name && span.respond_to?(:name=)
                 rescue StandardError => e
                   warn "[RailsOtelContext] Span name formatter error: #{e.message}"
                 end
