@@ -7,6 +7,9 @@ class CallContextProcessorTest < Minitest::Test
   include CallerLocationHelpers
 
   def setup
+    # Thread.each_caller_location requires Ruby >= 3.2 for call_context tests
+    skip 'Requires Ruby >= 3.2' unless Thread.respond_to?(:each_caller_location)
+
     RailsOtelContext.reset_configuration!
     @app_root = '/myapp'
     @processor = RailsOtelContext::CallContextProcessor.new(app_root: @app_root)

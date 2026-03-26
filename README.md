@@ -162,13 +162,13 @@ Creates full OpenTelemetry instrumentation for ClickHouse clients (no official i
 Add to your Rails Gemfile:
 
 ```ruby
-gem 'rails-otel-context'
+gem 'rails-otel-context', '~> 0.5'
 ```
 
-Or for local development/testing:
+Or from GitHub:
 
 ```ruby
-gem 'rails-otel-context', path: 'path/to/rails-otel-context'
+gem 'rails-otel-context', github: 'last9/rails-otel-context', branch: 'main'
 ```
 
 Then run:
@@ -220,68 +220,57 @@ RailsOtelContext.configure do |c|
 end
 ```
 
-### Custom Span Names with ActiveRecord Context
+### Custom Span Names (Recommended)
 
-By default, database spans are named by the underlying instrumentation (e.g., "SELECT postgres.users"). You can customize span names using ActiveRecord context to make traces more readable:
+By default, database spans have generic names like `select` or `insert`. The span name formatter renames them using ActiveRecord context — including scope names and custom model methods:
 
 ```ruby
 # config/initializers/rails_otel_context.rb
 RailsOtelContext.configure do |c|
-  # Simple formatter: "User.find" instead of "SELECT postgres.users"
   c.span_name_formatter = lambda do |original_name, ar_context|
-    model = ar_context[:model_name]
-    method = ar_context[:method_name]
+    model    = ar_context[:model_name]
+    return original_name unless model
 
-    if model && method
-      "#{model}.#{method}"
-    else
-      original_name # fallback to original if no AR context
-    end
+    scope    = ar_context[:scope_name]      # "recent_completed" (lazy scopes)
+    code_fn  = ar_context[:code_function]   # "total_revenue" (custom model methods)
+    code_ns  = ar_context[:code_namespace]  # "Transaction" (calling class)
+    ar_op    = ar_context[:method_name]     # "Load", "Count", "Create"
+
+    # Priority: scope name > custom model method > AR operation type
+    method = if scope
+               scope
+             elsif code_fn && code_ns == model && !code_fn.start_with?('<')
+               code_fn
+             else
+               ar_op
+             end
+
+    "#{model}.#{method}"
   end
 end
 ```
 
-**Benefits:**
-- **Clearer traces**: See "User.find" instead of generic "SELECT postgres.users"
-- **Better grouping**: Group spans by model and method in APM tools
-- **Faster debugging**: Immediately understand what operation caused the query
+**Result:**
 
-**Advanced example with operation types:**
+| ActiveRecord Call | Span Name |
+|---|---|
+| `Transaction.recent_completed.to_a` | `Transaction.recent_completed` |
+| `Transaction.total_revenue` | `Transaction.total_revenue` |
+| `Transaction.where(...).first` | `Transaction.Load` |
+| `Transaction.create(...)` | `Transaction.Create` |
+| `record.update(...)` | `Transaction.Update` |
 
-```ruby
-c.span_name_formatter = lambda do |original_name, ar_context|
-  model = ar_context[:model_name]
-  method = ar_context[:method_name]
-
-  if model && method
-    operation = case method
-                when /find/, /where/, /select/ then 'SELECT'
-                when /create/, /insert/ then 'INSERT'
-                when /update/, /save/ then 'UPDATE'
-                when /delete/, /destroy/ then 'DELETE'
-                else 'QUERY'
-                end
-    "#{operation} #{model}.#{method}"
-  else
-    original_name
-  end
-end
-```
-
-**Important notes:**
-- The formatter is called only when ActiveRecord context is available
-- Errors in the formatter are caught and logged—they won't break your application
-- The formatter applies to all DB spans (PostgreSQL, MySQL, Trilogy, ClickHouse)
-- Redis spans are not renamed (no ActiveRecord context for cache operations)
-- The original span name is preserved in the `l9.orig.name` attribute when a span is renamed
-
-See [`examples/rails/span_name_formatter_example.rb`](examples/rails/span_name_formatter_example.rb) for more examples.
+The original span name is preserved in the `l9.orig.name` attribute.
 
 ### ActiveRecord Model Attributes
 
-The gem automatically sets `code.activerecord.model` and `code.activerecord.method` on every database span. This lets you filter and group traces by model (e.g., "show me all slow Transaction queries").
+The gem automatically sets these attributes on every database span:
 
-All standard ActiveRecord operations are supported: `where`, `find_by`, `count`, `create`, `update`, `destroy`, `pluck`, `exists?`, `sum`, etc.
+- `code.activerecord.model` — the model name (e.g., `Transaction`, `User`)
+- `code.activerecord.method` — the AR operation type (e.g., `Load`, `Count`, `Create`)
+- `code.activerecord.scope` — the scope name, if a scope triggered the query (e.g., `recent_completed`)
+
+All standard operations are supported: `where`, `find_by`, `count`, `create`, `update`, `destroy`, `pluck`, `exists?`, `sum`, etc.
 
 ### Custom Span Attributes
 
