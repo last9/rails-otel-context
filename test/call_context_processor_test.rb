@@ -370,7 +370,7 @@ class CallContextProcessorTest < Minitest::Test
   def test_db_context_formatter_renames_and_preserves_original
     Thread.current[RailsOtelContext::ActiveRecordContext::THREAD_KEY] = { model_name: 'Order', method_name: 'Load' }
     RailsOtelContext.configure do |c|
-      c.span_name_formatter = lambda { |_orig, ctx| "#{ctx[:model_name]}.#{ctx[:method_name]}" }
+      c.span_name_formatter = ->(_orig, ctx) { "#{ctx[:model_name]}.#{ctx[:method_name]}" }
     end
     proc = new_processor
 
@@ -391,7 +391,10 @@ class CallContextProcessorTest < Minitest::Test
     }
     received_ctx = nil
     RailsOtelContext.configure do |c|
-      c.span_name_formatter = lambda { |_orig, ctx| received_ctx = ctx; 'renamed' }
+      c.span_name_formatter = lambda { |_orig, ctx|
+        received_ctx = ctx
+        'renamed'
+      }
     end
     proc = new_processor
 
@@ -410,7 +413,7 @@ class CallContextProcessorTest < Minitest::Test
   def test_db_context_formatter_exception_swallowed
     Thread.current[RailsOtelContext::ActiveRecordContext::THREAD_KEY] = { model_name: 'User', method_name: 'Load' }
     RailsOtelContext.configure do |c|
-      c.span_name_formatter = lambda { |_orig, _ctx| raise 'boom' }
+      c.span_name_formatter = ->(_orig, _ctx) { raise 'boom' }
     end
     proc = new_processor
 
