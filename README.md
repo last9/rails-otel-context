@@ -204,6 +204,10 @@ RailsOtelContext.configure do |c|
   c.mysql2_slow_query_enabled = true
   c.mysql2_slow_query_threshold_ms = 200.0
 
+  # Trilogy (MySQL) slow query tracking
+  c.trilogy_slow_query_enabled = true
+  c.trilogy_slow_query_threshold_ms = 200.0
+
   # Redis source tracking (opt-in, can be noisy)
   c.redis_source_enabled = false
 
@@ -267,10 +271,17 @@ end
 **Important notes:**
 - The formatter is called only when ActiveRecord context is available
 - Errors in the formatter are caught and logged—they won't break your application
-- The formatter applies to all adapters (PostgreSQL, MySQL, ClickHouse)
+- The formatter applies to all DB spans (PostgreSQL, MySQL, Trilogy, ClickHouse)
 - Redis spans are not renamed (no ActiveRecord context for cache operations)
+- The original span name is preserved in the `l9.orig.name` attribute when a span is renamed
 
 See [`examples/rails/span_name_formatter_example.rb`](examples/rails/span_name_formatter_example.rb) for more examples.
+
+### ActiveRecord Model Attributes
+
+The gem automatically sets `code.activerecord.model` and `code.activerecord.method` on every database span. This lets you filter and group traces by model (e.g., "show me all slow Transaction queries").
+
+All standard ActiveRecord operations are supported: `where`, `find_by`, `count`, `create`, `update`, `destroy`, `pluck`, `exists?`, `sum`, etc.
 
 ### Custom Span Attributes
 
