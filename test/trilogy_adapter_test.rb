@@ -52,55 +52,6 @@ class TrilogyAdapterTest < Minitest::Test
     end
   end
 
-  def test_query_sets_activerecord_context
-    patch = RailsOtelContext::Adapters::Trilogy.send(:build_patch_module)
-    RailsOtelContext.configure { |c| c.trilogy_slow_query_threshold_ms = 0.0 }
-    patch.configure(app_root: Dir.pwd, threshold_ms: 0.0)
-
-    client_class = new_client_class
-    client_class.prepend(patch)
-    client = client_class.new
-
-    with_thread_source('/app/models/user.rb', 10) do
-      with_current_span_with_valid_context do |span|
-        with_activerecord_context(model_name: 'User', method_name: 'find_by') do
-          client.query('SELECT * FROM users WHERE email = ?')
-          assert_equal 'User', span.attributes['code.activerecord.model']
-          assert_equal 'find_by', span.attributes['code.activerecord.method']
-        end
-      end
-    end
-  end
-
-  def test_query_applies_span_name_formatter
-    patch = RailsOtelContext::Adapters::Trilogy.send(:build_patch_module)
-    RailsOtelContext.configure { |c| c.trilogy_slow_query_threshold_ms = 0.0 }
-    patch.configure(app_root: Dir.pwd, threshold_ms: 0.0)
-
-    client_class = new_client_class
-    client_class.prepend(patch)
-    client = client_class.new
-
-    RailsOtelContext.configuration.span_name_formatter = lambda { |_original, ar_context|
-      "#{ar_context[:model_name]}.#{ar_context[:method_name]}"
-    }
-
-    with_thread_source('/app/models/user.rb', 10) do
-      with_current_span_with_valid_context do |span|
-        span.define_singleton_method(:name) { 'SELECT users' }
-        span.define_singleton_method(:name=) { |n| @custom_name = n }
-        span.define_singleton_method(:custom_name) { @custom_name }
-
-        with_activerecord_context(model_name: 'User', method_name: 'find') do
-          client.query('SELECT * FROM users')
-          assert_equal 'User.find', span.custom_name
-        end
-      end
-    end
-  ensure
-    RailsOtelContext.configuration.span_name_formatter = nil
-  end
-
   def test_query_skips_when_span_context_invalid
     patch = RailsOtelContext::Adapters::Trilogy.send(:build_patch_module)
     RailsOtelContext.configure { |c| c.trilogy_slow_query_threshold_ms = 0.0 }

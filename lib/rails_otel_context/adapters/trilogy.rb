@@ -44,43 +44,21 @@ module RailsOtelContext
               nil
             end
 
-            def activerecord_context
-              RailsOtelContext::ActiveRecordContext.extract(app_root: app_root)
-            end
+            # AR context is now handled by CallContextProcessor via sql.active_record notification
           end
 
+          # AR context attributes and span renaming are handled by
+          # CallContextProcessor.apply_db_context (via sql.active_record notification).
+          # This adapter only handles slow query source location tracking.
           define_method(:query) do |sql|
-            ar_context = mod.activerecord_context
             source = mod.source_location_for_app
-
-            # Store AR context in thread-local for the CallContextProcessor's
-            # on_start hook, which fires when OTel creates the DB span inside super.
-            Thread.current[:_rails_otel_ctx_ar] = ar_context
-            Thread.current[:_rails_otel_ctx_src] = source
-
             started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
             result = super(sql)
             duration_ms = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - started_at) * 1000.0
 
-            # Also try to apply directly (works when prepend order is correct)
             span = OpenTelemetry::Trace.current_span
             if span.context.valid?
-              config = RailsOtelContext.configuration
-
-              if ar_context && config.span_name_formatter
-                begin
-                  new_name = config.span_name_formatter.call(span.name, ar_context)
-                  span.name = new_name if new_name && new_name != span.name && span.respond_to?(:name=)
-                rescue StandardError # rubocop:disable Lint/SuppressedException
-                end
-              end
-
-              if ar_context
-                span.set_attribute('code.activerecord.model', ar_context[:model_name]) if ar_context[:model_name]
-                span.set_attribute('code.activerecord.method', ar_context[:method_name]) if ar_context[:method_name]
-              end
-
-              threshold = config.trilogy_slow_query_threshold_ms
+              threshold = RailsOtelContext.configuration.trilogy_slow_query_threshold_ms
               if source && duration_ms >= threshold
                 span.set_attribute('code.filepath', source[0])
                 span.set_attribute('code.lineno', source[1])
@@ -90,9 +68,6 @@ module RailsOtelContext
             end
 
             result
-          ensure
-            Thread.current[:_rails_otel_ctx_ar] = nil
-            Thread.current[:_rails_otel_ctx_src] = nil
           end
         end
 

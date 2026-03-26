@@ -102,48 +102,6 @@ class Mysql2AdapterTest < Minitest::Test
     end
   end
 
-  def test_query_sets_activerecord_context_for_slow_queries
-    patch = RailsOtelContext::Adapters::Mysql2.send(:build_patch_module)
-    RailsOtelContext.configure { |c| c.mysql2_slow_query_threshold_ms = 0.0 }
-    patch.configure(app_root: Dir.pwd, threshold_ms: 0.0)
-
-    client_class = new_client_class
-    client_class.prepend(patch)
-    client = client_class.new
-
-    with_thread_source('/app/models/payment.rb', 10) do
-      with_ar_context({ model_name: 'Payment', method_name: 'create' }) do
-        with_current_span_with_valid_context do |span|
-          client.query('INSERT INTO payments')
-          assert_equal 'Payment', span.attributes['code.activerecord.model']
-          assert_equal 'create', span.attributes['code.activerecord.method']
-        end
-      end
-    end
-  end
-
-  def test_prepare_sets_activerecord_context_for_slow_queries
-    patch = RailsOtelContext::Adapters::Mysql2.send(:build_patch_module)
-    RailsOtelContext.configure { |c| c.mysql2_slow_query_threshold_ms = 0.0 }
-    patch.configure(app_root: Dir.pwd, threshold_ms: 0.0)
-
-    client_class = new_client_class
-    client_class.prepend(patch)
-    client = client_class.new
-
-    with_thread_source('/app/models/payment.rb', 20) do
-      with_ar_context({ model_name: 'Payment', method_name: 'where' }) do
-        with_current_span_with_valid_context do |span|
-          client.prepare('SELECT ?')
-          assert_equal 'Payment', span.attributes['code.activerecord.model']
-          assert_equal 'where', span.attributes['code.activerecord.method']
-        end
-      end
-    end
-  end
-
-  private
-
   def new_client_class
     Class.new do
       def query(_sql, _options = {})
