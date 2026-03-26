@@ -32,12 +32,10 @@ jobs:
 
     - name: Run tests
       run: |
-        ruby -Ilib:test test/pg_adapter_test.rb
-        ruby -Ilib:test test/mysql2_adapter_test.rb
-        ruby -Ilib:test test/redis_adapter_test.rb
-        ruby -Ilib:test test/clickhouse_adapter_test.rb
-        ruby -Ilib:test test/configuration_test.rb
-        ruby -Ilib:test test/activerecord_context_test.rb
+        for f in test/*_test.rb; do
+          echo "Running $f..."
+          ruby -Ilib:test "$f"
+        done
       env:
         RAILS_OTEL_CONTEXT_TEST: 'true'
 
