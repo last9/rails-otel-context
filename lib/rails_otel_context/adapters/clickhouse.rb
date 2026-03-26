@@ -6,6 +6,7 @@ module RailsOtelContext
       module_function
 
       CANDIDATE_METHODS = %i[query select insert execute command].freeze
+      REENTRANCY_KEY = :_rails_otel_ctx_clickhouse_instrumenting
 
       def install!(app_root:, threshold_ms:)
         begin
@@ -45,82 +46,53 @@ module RailsOtelContext
       def build_patch_module(methods)
         mod = Module.new do
           class << self
+            include RailsOtelContext::SourceLocation
+
             attr_accessor :app_root, :threshold_ms
 
             def configure(app_root:, threshold_ms:)
               @app_root = app_root.to_s
               @threshold_ms = threshold_ms.to_f
             end
-
-            def source_location_for_app
-              return unless Thread.respond_to?(:each_caller_location)
-
-              Thread.each_caller_location do |location|
-                path = location.absolute_path || location.path
-                next unless path&.start_with?(app_root)
-                next if path.include?('/gems/')
-
-                return [path.delete_prefix("#{app_root}/"), location.lineno]
-              end
-
-              nil
-            end
-
-            def activerecord_context
-              RailsOtelContext::ActiveRecordContext.extract(app_root: app_root)
-            end
           end
 
+          # AR context, span renaming, and l9.orig.name are handled by
+          # CallContextProcessor.apply_db_context (via sql.active_record notification).
+          # This adapter creates ClickHouse spans and handles slow query tracking.
           methods.each do |method_name|
             define_method(method_name) do |*args, &block|
-              if Thread.current[:rails_otel_context_clickhouse_instrumenting]
+              if Thread.current[RailsOtelContext::Adapters::Clickhouse::REENTRANCY_KEY]
                 return super(*args, &block)
               end
 
               source = mod.source_location_for_app
-              ar_context = mod.activerecord_context
               started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
               operation = method_name.to_s.upcase
               statement = args.first.is_a?(String) ? args.first : nil
 
               tracer = OpenTelemetry.tracer_provider.tracer('rails-otel-context-clickhouse')
-              Thread.current[:rails_otel_context_clickhouse_instrumenting] = true
+              Thread.current[RailsOtelContext::Adapters::Clickhouse::REENTRANCY_KEY] = true
 
               tracer.in_span("#{operation} clickhouse", kind: :client) do |span|
                 span.set_attribute('db.system', 'clickhouse')
                 span.set_attribute('db.operation', operation)
                 span.set_attribute('db.statement', statement) if statement
 
-                # Rename span if formatter is configured and AR context is available
-                if ar_context && RailsOtelContext.configuration.span_name_formatter
-                  begin
-                    new_name = RailsOtelContext.configuration.span_name_formatter.call(span.name, ar_context)
-                    span.name = new_name if new_name && new_name != span.name && span.respond_to?(:name=)
-                  rescue StandardError => e
-                    warn "[RailsOtelContext] Span name formatter error: #{e.message}"
-                  end
-                end
-
                 result = super(*args, &block)
                 duration_ms = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - started_at) * 1000.0
 
-                if source && duration_ms >= mod.threshold_ms
+                threshold = RailsOtelContext.configuration.clickhouse_slow_query_threshold_ms
+                if source && duration_ms >= threshold
                   span.set_attribute('code.filepath', source[0])
                   span.set_attribute('code.lineno', source[1])
                   span.set_attribute('db.query.duration_ms', duration_ms.round(1))
-                  span.set_attribute('db.query.slow_threshold_ms', mod.threshold_ms)
-                end
-
-                # Add ActiveRecord context if available
-                if ar_context
-                  span.set_attribute('code.activerecord.model', ar_context[:model_name]) if ar_context[:model_name]
-                  span.set_attribute('code.activerecord.method', ar_context[:method_name]) if ar_context[:method_name]
+                  span.set_attribute('db.query.slow_threshold_ms', threshold)
                 end
 
                 result
               end
             ensure
-              Thread.current[:rails_otel_context_clickhouse_instrumenting] = false
+              Thread.current[RailsOtelContext::Adapters::Clickhouse::REENTRANCY_KEY] = false
             end
           end
         end
