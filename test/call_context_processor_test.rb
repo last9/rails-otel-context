@@ -328,6 +328,104 @@ class CallContextProcessorTest < Minitest::Test
   end
 
   # ---------------------------------------------------------------------------
+  # apply_db_context (AR model attributes, scope, formatter, l9.orig.name)
+  # ---------------------------------------------------------------------------
+
+  def test_db_context_sets_ar_model_and_method
+    Thread.current[RailsOtelContext::ActiveRecordContext::THREAD_KEY] = { model_name: 'User', method_name: 'Load' }
+    span = FakeSpan.new
+    @processor.on_start(span, nil)
+    assert_equal 'User', span.attributes['code.activerecord.model']
+    assert_equal 'Load', span.attributes['code.activerecord.method']
+  ensure
+    Thread.current[RailsOtelContext::ActiveRecordContext::THREAD_KEY] = nil
+  end
+
+  def test_db_context_sets_scope_name
+    Thread.current[RailsOtelContext::ActiveRecordContext::THREAD_KEY] = {
+      model_name: 'Transaction', method_name: 'Load', scope_name: 'recent_completed'
+    }
+    span = FakeSpan.new
+    @processor.on_start(span, nil)
+    assert_equal 'recent_completed', span.attributes['code.activerecord.scope']
+  ensure
+    Thread.current[RailsOtelContext::ActiveRecordContext::THREAD_KEY] = nil
+  end
+
+  def test_db_context_no_scope_when_absent
+    Thread.current[RailsOtelContext::ActiveRecordContext::THREAD_KEY] = { model_name: 'User', method_name: 'Count' }
+    span = FakeSpan.new
+    @processor.on_start(span, nil)
+    refute span.attributes.key?('code.activerecord.scope')
+  ensure
+    Thread.current[RailsOtelContext::ActiveRecordContext::THREAD_KEY] = nil
+  end
+
+  def test_db_context_noop_when_no_ar_context
+    span = FakeSpan.new
+    @processor.on_start(span, nil)
+    refute span.attributes.key?('code.activerecord.model')
+  end
+
+  def test_db_context_formatter_renames_and_preserves_original
+    Thread.current[RailsOtelContext::ActiveRecordContext::THREAD_KEY] = { model_name: 'Order', method_name: 'Load' }
+    RailsOtelContext.configure do |c|
+      c.span_name_formatter = ->(_orig, ctx) { "#{ctx[:model_name]}.#{ctx[:method_name]}" }
+    end
+    proc = new_processor
+
+    span = FakeSpan.new
+    span.define_singleton_method(:name) { @custom_name || 'select' }
+    span.define_singleton_method(:name=) { |n| @custom_name = n }
+
+    proc.on_start(span, nil)
+    assert_equal 'Order.Load', span.name
+    assert_equal 'select', span.attributes['l9.orig.name']
+  ensure
+    Thread.current[RailsOtelContext::ActiveRecordContext::THREAD_KEY] = nil
+  end
+
+  def test_db_context_formatter_receives_scope_and_code_context
+    Thread.current[RailsOtelContext::ActiveRecordContext::THREAD_KEY] = {
+      model_name: 'Transaction', method_name: 'Load', scope_name: 'recent_completed'
+    }
+    received_ctx = nil
+    RailsOtelContext.configure do |c|
+      c.span_name_formatter = lambda { |_orig, ctx|
+        received_ctx = ctx
+        'renamed'
+      }
+    end
+    proc = new_processor
+
+    span = FakeSpan.new
+    span.define_singleton_method(:name) { 'select' }
+    span.define_singleton_method(:name=) { |n| @custom_name = n }
+
+    proc.on_start(span, nil)
+
+    assert_equal 'recent_completed', received_ctx[:scope_name]
+    assert_equal 'Transaction', received_ctx[:model_name]
+  ensure
+    Thread.current[RailsOtelContext::ActiveRecordContext::THREAD_KEY] = nil
+  end
+
+  def test_db_context_formatter_exception_swallowed
+    Thread.current[RailsOtelContext::ActiveRecordContext::THREAD_KEY] = { model_name: 'User', method_name: 'Load' }
+    RailsOtelContext.configure do |c|
+      c.span_name_formatter = ->(_orig, _ctx) { raise 'boom' }
+    end
+    proc = new_processor
+
+    span = FakeSpan.new
+    proc.on_start(span, nil)
+    # Should not raise, and AR attributes should still be set
+    assert_equal 'User', span.attributes['code.activerecord.model']
+  ensure
+    Thread.current[RailsOtelContext::ActiveRecordContext::THREAD_KEY] = nil
+  end
+
+  # ---------------------------------------------------------------------------
   # no-op lifecycle methods
   # ---------------------------------------------------------------------------
 

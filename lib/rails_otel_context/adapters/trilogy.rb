@@ -44,41 +44,26 @@ module RailsOtelContext
               nil
             end
 
-            def activerecord_context
-              RailsOtelContext::ActiveRecordContext.extract(app_root: app_root)
-            end
+            # AR context is now handled by CallContextProcessor via sql.active_record notification
           end
 
+          # AR context attributes and span renaming are handled by
+          # CallContextProcessor.apply_db_context (via sql.active_record notification).
+          # This adapter only handles slow query source location tracking.
           define_method(:query) do |sql|
             source = mod.source_location_for_app
-            ar_context = mod.activerecord_context
             started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
             result = super(sql)
             duration_ms = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - started_at) * 1000.0
 
             span = OpenTelemetry::Trace.current_span
             if span.context.valid?
-              # Rename span if formatter is configured and AR context is available
-              if ar_context && RailsOtelContext.configuration.span_name_formatter
-                begin
-                  new_name = RailsOtelContext.configuration.span_name_formatter.call(span.name, ar_context)
-                  span.update_name(new_name) if new_name && new_name != span.name
-                rescue StandardError => e
-                  warn "[RailsOtelContext] Span name formatter error: #{e.message}"
-                end
-              end
-
-              if source && duration_ms >= mod.threshold_ms
+              threshold = RailsOtelContext.configuration.trilogy_slow_query_threshold_ms
+              if source && duration_ms >= threshold
                 span.set_attribute('code.filepath', source[0])
                 span.set_attribute('code.lineno', source[1])
                 span.set_attribute('db.query.duration_ms', duration_ms.round(1))
-                span.set_attribute('db.query.slow_threshold_ms', mod.threshold_ms)
-
-                # Add ActiveRecord context if available
-                if ar_context
-                  span.set_attribute('code.activerecord.model', ar_context[:model_name]) if ar_context[:model_name]
-                  span.set_attribute('code.activerecord.method', ar_context[:method_name]) if ar_context[:method_name]
-                end
+                span.set_attribute('db.query.slow_threshold_ms', threshold)
               end
             end
 

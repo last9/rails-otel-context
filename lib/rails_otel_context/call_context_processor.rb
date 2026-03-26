@@ -27,12 +27,14 @@ module RailsOtelContext
       @request_context_enabled = config.request_context_enabled
       @custom_span_attributes = config.custom_span_attributes
       @custom_span_attributes_enabled = config.custom_span_attributes_enabled
+      @span_name_formatter = config.span_name_formatter
       @has_each_caller_location = Thread.respond_to?(:each_caller_location)
     end
 
     def on_start(span, _parent_context)
       apply_call_context(span) if @call_context_enabled
       apply_request_context(span) if @request_context_enabled
+      apply_db_context(span)
       apply_custom_attributes(span) if @custom_span_attributes
     end
 
@@ -64,6 +66,43 @@ module RailsOtelContext
 
       span.set_attribute(SPAN_CONTROLLER_ATTR, controller)
       span.set_attribute(SPAN_ACTION_ATTR, action) if action
+    end
+
+    def apply_db_context(span)
+      base_context = ActiveRecordContext.current
+      return unless base_context
+
+      # Shallow copy to avoid mutating the shared thread-local hash
+      ar_context = base_context.dup
+      enrich_ar_context(span, ar_context)
+      set_ar_attributes(span, ar_context)
+      apply_span_name_formatter(span, ar_context)
+    rescue StandardError
+      # Never let AR context or formatter errors break span processing
+    end
+
+    def enrich_ar_context(span, ar_context)
+      return unless span.respond_to?(:attributes)
+
+      ar_context[:code_namespace] = span.attributes['code.namespace']
+      ar_context[:code_function] = span.attributes['code.function']
+    end
+
+    def set_ar_attributes(span, ar_context)
+      span.set_attribute('code.activerecord.model', ar_context[:model_name]) if ar_context[:model_name]
+      span.set_attribute('code.activerecord.method', ar_context[:method_name]) if ar_context[:method_name]
+      span.set_attribute('code.activerecord.scope', ar_context[:scope_name]) if ar_context[:scope_name]
+    end
+
+    def apply_span_name_formatter(span, ar_context)
+      return unless @span_name_formatter
+
+      original_name = span.name
+      new_name = @span_name_formatter.call(original_name, ar_context)
+      return unless new_name && new_name != original_name && span.respond_to?(:name=)
+
+      span.set_attribute('l9.orig.name', original_name)
+      span.name = new_name
     end
 
     def apply_custom_attributes(span)

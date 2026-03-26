@@ -9,10 +9,12 @@ class TrilogyAdapterTest < Minitest::Test
   ValidContext = Struct.new(:valid?)
 
   def setup
+    RailsOtelContext.reset_configuration!
     RailsOtelContext::Adapters::Trilogy.instance_variable_set(:@patch_module, nil)
   end
 
   def test_query_sets_source_attributes_for_slow_queries
+    RailsOtelContext.configure { |c| c.trilogy_slow_query_threshold_ms = 0.0 }
     patch = RailsOtelContext::Adapters::Trilogy.send(:build_patch_module)
     patch.configure(app_root: Dir.pwd, threshold_ms: 0.0)
 
@@ -33,6 +35,7 @@ class TrilogyAdapterTest < Minitest::Test
   end
 
   def test_query_skips_attributes_for_fast_queries
+    RailsOtelContext.configure { |c| c.trilogy_slow_query_threshold_ms = 999_999.0 }
     patch = RailsOtelContext::Adapters::Trilogy.send(:build_patch_module)
     patch.configure(app_root: Dir.pwd, threshold_ms: 999_999.0)
 
@@ -49,55 +52,9 @@ class TrilogyAdapterTest < Minitest::Test
     end
   end
 
-  def test_query_sets_activerecord_context
-    patch = RailsOtelContext::Adapters::Trilogy.send(:build_patch_module)
-    patch.configure(app_root: Dir.pwd, threshold_ms: 0.0)
-
-    client_class = new_client_class
-    client_class.prepend(patch)
-    client = client_class.new
-
-    with_thread_source('/app/models/user.rb', 10) do
-      with_current_span_with_valid_context do |span|
-        with_activerecord_context(model_name: 'User', method_name: 'find_by') do
-          client.query('SELECT * FROM users WHERE email = ?')
-          assert_equal 'User', span.attributes['code.activerecord.model']
-          assert_equal 'find_by', span.attributes['code.activerecord.method']
-        end
-      end
-    end
-  end
-
-  def test_query_applies_span_name_formatter
-    patch = RailsOtelContext::Adapters::Trilogy.send(:build_patch_module)
-    patch.configure(app_root: Dir.pwd, threshold_ms: 0.0)
-
-    client_class = new_client_class
-    client_class.prepend(patch)
-    client = client_class.new
-
-    RailsOtelContext.configuration.span_name_formatter = lambda { |_original, ar_context|
-      "#{ar_context[:model_name]}.#{ar_context[:method_name]}"
-    }
-
-    with_thread_source('/app/models/user.rb', 10) do
-      with_current_span_with_valid_context do |span|
-        span.define_singleton_method(:name) { 'SELECT users' }
-        span.define_singleton_method(:update_name) { |n| @updated_name = n }
-        span.define_singleton_method(:updated_name) { @updated_name }
-
-        with_activerecord_context(model_name: 'User', method_name: 'find') do
-          client.query('SELECT * FROM users')
-          assert_equal 'User.find', span.updated_name
-        end
-      end
-    end
-  ensure
-    RailsOtelContext.configuration.span_name_formatter = nil
-  end
-
   def test_query_skips_when_span_context_invalid
     patch = RailsOtelContext::Adapters::Trilogy.send(:build_patch_module)
+    RailsOtelContext.configure { |c| c.trilogy_slow_query_threshold_ms = 0.0 }
     patch.configure(app_root: Dir.pwd, threshold_ms: 0.0)
 
     client_class = new_client_class
@@ -115,6 +72,7 @@ class TrilogyAdapterTest < Minitest::Test
 
   def test_query_skips_source_attributes_when_no_source_location
     patch = RailsOtelContext::Adapters::Trilogy.send(:build_patch_module)
+    RailsOtelContext.configure { |c| c.trilogy_slow_query_threshold_ms = 0.0 }
     patch.configure(app_root: Dir.pwd, threshold_ms: 0.0)
 
     client_class = new_client_class
@@ -146,6 +104,7 @@ class TrilogyAdapterTest < Minitest::Test
     Object.const_set(:Trilogy, stub_trilogy)
 
     patch = RailsOtelContext::Adapters::Trilogy.patch_module_for
+    RailsOtelContext.configure { |c| c.trilogy_slow_query_threshold_ms = 200.0 }
     patch.configure(app_root: Dir.pwd, threshold_ms: 200.0)
 
     # Install once
