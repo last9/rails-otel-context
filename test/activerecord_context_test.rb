@@ -70,6 +70,29 @@ class ActiveRecordContextTest < Minitest::Test
     assert_nil RailsOtelContext::ActiveRecordContext.current
   end
 
+  # Scope tracking via thread-local
+
+  def test_subscriber_includes_scope_name_from_thread_local
+    Thread.current[RailsOtelContext::ActiveRecordContext::SCOPE_THREAD_KEY] = 'recent_completed'
+    sub = RailsOtelContext::ActiveRecordContext::Subscriber.new
+    sub.start('sql.active_record', '1', { name: 'Transaction Load' })
+
+    ctx = RailsOtelContext::ActiveRecordContext.current
+    assert_equal 'Transaction', ctx[:model_name]
+    assert_equal 'Load', ctx[:method_name]
+    assert_equal 'recent_completed', ctx[:scope_name]
+  ensure
+    Thread.current[RailsOtelContext::ActiveRecordContext::SCOPE_THREAD_KEY] = nil
+  end
+
+  def test_subscriber_no_scope_when_thread_local_empty
+    sub = RailsOtelContext::ActiveRecordContext::Subscriber.new
+    sub.start('sql.active_record', '1', { name: 'Transaction Load' })
+
+    ctx = RailsOtelContext::ActiveRecordContext.current
+    assert_nil ctx[:scope_name]
+  end
+
   # Legacy extract
 
   def test_extract_returns_current
