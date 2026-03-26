@@ -77,8 +77,12 @@ class PgAdapterTest < Minitest::Test
       with_ar_context({ model_name: 'Order', method_name: 'find' }) do
         with_current_span do |span|
           host.exec('select 1')
-          refute span.attributes.key?('code.activerecord.model')
-          refute span.attributes.key?('code.activerecord.method')
+          # AR context is always set regardless of query speed
+          assert_equal 'Order', span.attributes['code.activerecord.model']
+          assert_equal 'find', span.attributes['code.activerecord.method']
+          # But slow-query attributes should NOT be set for fast queries
+          refute span.attributes.key?('db.query.duration_ms')
+          refute span.attributes.key?('db.query.slow_threshold_ms')
         end
       end
     end

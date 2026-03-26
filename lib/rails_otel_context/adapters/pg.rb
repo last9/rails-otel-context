@@ -81,17 +81,18 @@ module RailsOtelContext
                   end
                 end
 
+                # Always set AR context — useful for filtering by model regardless of query speed
+                if ar_context
+                  span.set_attribute('code.activerecord.model', ar_context[:model_name]) if ar_context[:model_name]
+                  span.set_attribute('code.activerecord.method', ar_context[:method_name]) if ar_context[:method_name]
+                end
+
+                # Source location and timing only for slow queries
                 if source && duration_ms >= mod.threshold_ms
                   span.set_attribute('code.filepath', source[0])
                   span.set_attribute('code.lineno', source[1])
                   span.set_attribute('db.query.duration_ms', duration_ms.round(1))
                   span.set_attribute('db.query.slow_threshold_ms', mod.threshold_ms)
-
-                  # Add ActiveRecord context if available
-                  if ar_context
-                    span.set_attribute('code.activerecord.model', ar_context[:model_name]) if ar_context[:model_name]
-                    span.set_attribute('code.activerecord.method', ar_context[:method_name]) if ar_context[:method_name]
-                  end
                 end
 
                 user_block ? user_block.call(result) : result
