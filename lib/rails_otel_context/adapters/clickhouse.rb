@@ -59,19 +59,20 @@ module RailsOtelContext
           # AR context, span renaming, and l9.orig.name are handled by
           # CallContextProcessor.apply_db_context (via sql.active_record notification).
           # This adapter creates ClickHouse spans and handles slow query tracking.
+          reentrancy_key = RailsOtelContext::Adapters::Clickhouse::REENTRANCY_KEY
+
           methods.each do |method_name|
+            operation = method_name.to_s.upcase.freeze
+
             define_method(method_name) do |*args, &block|
-              if Thread.current[RailsOtelContext::Adapters::Clickhouse::REENTRANCY_KEY]
-                return super(*args, &block)
-              end
+              return super(*args, &block) if Thread.current[reentrancy_key]
 
               source = mod.source_location_for_app
               started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-              operation = method_name.to_s.upcase
               statement = args.first.is_a?(String) ? args.first : nil
 
               tracer = OpenTelemetry.tracer_provider.tracer('rails-otel-context-clickhouse')
-              Thread.current[RailsOtelContext::Adapters::Clickhouse::REENTRANCY_KEY] = true
+              Thread.current[reentrancy_key] = true
 
               tracer.in_span("#{operation} clickhouse", kind: :client) do |span|
                 span.set_attribute('db.system', 'clickhouse')
@@ -92,7 +93,7 @@ module RailsOtelContext
                 result
               end
             ensure
-              Thread.current[RailsOtelContext::Adapters::Clickhouse::REENTRANCY_KEY] = false
+              Thread.current[reentrancy_key] = false
             end
           end
         end
