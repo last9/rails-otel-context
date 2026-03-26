@@ -42,11 +42,12 @@ module RailsOtelContext
       def scope(name, body, &)
         super
 
+        name_str = name.to_s.freeze
         original = method(name)
         define_singleton_method(name) do |*args|
           relation = original.call(*args)
           if relation.is_a?(::ActiveRecord::Relation)
-            relation.instance_variable_set(:@_otel_scope_name, name.to_s)
+            relation.instance_variable_set(:@_otel_scope_name, name_str)
           end
           relation
         end

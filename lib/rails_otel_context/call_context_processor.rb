@@ -27,6 +27,7 @@ module RailsOtelContext
       @request_context_enabled = config.request_context_enabled
       @custom_span_attributes = config.custom_span_attributes
       @custom_span_attributes_enabled = config.custom_span_attributes_enabled
+      @span_name_formatter = config.span_name_formatter
       @has_each_caller_location = Thread.respond_to?(:each_caller_location)
     end
 
@@ -68,9 +69,11 @@ module RailsOtelContext
     end
 
     def apply_db_context(span)
-      ar_context = ActiveRecordContext.current
-      return unless ar_context
+      base_context = ActiveRecordContext.current
+      return unless base_context
 
+      # Shallow copy to avoid mutating the shared thread-local hash
+      ar_context = base_context.dup
       enrich_ar_context(span, ar_context)
       set_ar_attributes(span, ar_context)
       apply_span_name_formatter(span, ar_context)
@@ -92,11 +95,10 @@ module RailsOtelContext
     end
 
     def apply_span_name_formatter(span, ar_context)
-      formatter = RailsOtelContext.configuration.span_name_formatter
-      return unless formatter
+      return unless @span_name_formatter
 
       original_name = span.name
-      new_name = formatter.call(original_name, ar_context)
+      new_name = @span_name_formatter.call(original_name, ar_context)
       return unless new_name && new_name != original_name && span.respond_to?(:name=)
 
       span.set_attribute('l9.orig.name', original_name)
