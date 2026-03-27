@@ -11,10 +11,9 @@ class ClickhouseAdapterTest < Minitest::Test
     RailsOtelContext::Adapters::Clickhouse.instance_variable_set(:@patch_modules, nil)
   end
 
-  def test_query_creates_span_with_slow_source_attributes
-    RailsOtelContext.configure { |c| c.clickhouse_slow_query_threshold_ms = 0.0 }
+  def test_query_creates_span_with_source_attributes
     patch = RailsOtelContext::Adapters::Clickhouse.send(:build_patch_module, [:query])
-    patch.configure(app_root: Dir.pwd, threshold_ms: 0.0)
+    patch.configure(app_root: Dir.pwd)
 
     client_class = Class.new do
       def query(_sql)
@@ -40,10 +39,9 @@ class ClickhouseAdapterTest < Minitest::Test
     end
   end
 
-  def test_query_omits_slow_source_attributes_when_below_threshold
-    RailsOtelContext.configure { |c| c.clickhouse_slow_query_threshold_ms = 999_999.0 }
+  def test_query_omits_source_attributes_when_no_app_source
     patch = RailsOtelContext::Adapters::Clickhouse.send(:build_patch_module, [:query])
-    patch.configure(app_root: Dir.pwd, threshold_ms: 999_999.0)
+    patch.configure(app_root: '/unlikely/root')
 
     client_class = Class.new do
       def query(_sql)
@@ -52,13 +50,11 @@ class ClickhouseAdapterTest < Minitest::Test
     end
     client_class.prepend(patch)
 
-    with_thread_source('/app/services/warehouse.rb', 18) do
-      with_tracer_spy do |calls|
-        client_class.new.query('SELECT 1')
-        span = calls[0]
-        refute span[:attributes].key?('code.filepath')
-        refute span[:attributes].key?('code.lineno')
-      end
+    with_tracer_spy do |calls|
+      client_class.new.query('SELECT 1')
+      span = calls[0]
+      refute span[:attributes].key?('code.filepath')
+      refute span[:attributes].key?('code.lineno')
     end
   end
 

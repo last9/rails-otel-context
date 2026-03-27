@@ -2,36 +2,18 @@
 
 module RailsOtelContext
   class Configuration
-    attr_accessor :pg_slow_query_enabled,
-                  :pg_slow_query_threshold_ms,
-                  :mysql2_slow_query_enabled,
-                  :mysql2_slow_query_threshold_ms,
-                  :trilogy_slow_query_enabled,
-                  :trilogy_slow_query_threshold_ms,
-                  :redis_source_enabled,
+    attr_accessor :redis_source_enabled,
                   :clickhouse_enabled,
-                  :clickhouse_slow_query_threshold_ms,
                   :span_name_formatter,
-                  :call_context_enabled,
-                  :custom_span_attributes_enabled,
                   :request_context_enabled
 
     attr_reader :custom_span_attributes
 
     def initialize
-      @pg_slow_query_enabled = true
-      @pg_slow_query_threshold_ms = 200.0
-      @mysql2_slow_query_enabled = true
-      @mysql2_slow_query_threshold_ms = 200.0
-      @trilogy_slow_query_enabled = true
-      @trilogy_slow_query_threshold_ms = 200.0
       @redis_source_enabled = false
       @clickhouse_enabled = true
-      @clickhouse_slow_query_threshold_ms = 200.0
       @span_name_formatter = nil
-      @call_context_enabled = true
       @custom_span_attributes = nil
-      @custom_span_attributes_enabled = true
       @request_context_enabled = false
     end
 

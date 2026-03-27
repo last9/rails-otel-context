@@ -99,7 +99,6 @@ module RailsOtelContext
     def stub_scope(scope_name)
       Thread.current[SCOPE_THREAD_KEY] = scope_name
     end
-    private :stub_scope
 
     # Parses "Transaction Load" → { model_name: "Transaction", method_name: "Load" }
     def parse_ar_name(name)
@@ -116,9 +115,5 @@ module RailsOtelContext
       { model_name: model_name, method_name: method_name }
     end
 
-    # Legacy method for adapter tests.
-    def extract(app_root: nil) # rubocop:disable Lint/UnusedMethodArgument
-      current
-    end
   end
 end

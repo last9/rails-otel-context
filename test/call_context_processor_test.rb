@@ -203,21 +203,6 @@ class CallContextProcessorTest < Minitest::Test
   end
 
   # ---------------------------------------------------------------------------
-  # Config flag
-  # ---------------------------------------------------------------------------
-
-  def test_does_nothing_when_call_context_disabled
-    RailsOtelContext.configure { |c| c.call_context_enabled = false }
-    proc = new_processor
-    span = FakeSpan.new
-    with_caller_location(path: "#{@app_root}/app/jobs/invoice_job.rb", label: 'perform') do
-      proc.on_start(span, nil)
-    end
-    refute span.attributes.key?('code.namespace')
-    refute span.attributes.key?('code.function')
-  end
-
-  # ---------------------------------------------------------------------------
   # custom_span_attributes
   # ---------------------------------------------------------------------------
 
@@ -276,32 +261,14 @@ class CallContextProcessorTest < Minitest::Test
     refute span.attributes.key?('team')
   end
 
-  def test_custom_attributes_disabled_via_flag
-    call_count = 0
+  def test_custom_attributes_skipped_when_nil
     RailsOtelContext.configure do |c|
-      c.custom_span_attributes = lambda {
-        call_count += 1
-        { 'team' => 'backend' }
-      }
-      c.custom_span_attributes_enabled = false
+      c.custom_span_attributes = nil
     end
     proc = new_processor
     span = FakeSpan.new
     proc.on_start(span, nil)
-    assert_equal 0, call_count
     refute span.attributes.key?('team')
-  end
-
-  def test_custom_attributes_works_with_call_context_disabled
-    RailsOtelContext.configure do |c|
-      c.call_context_enabled = false
-      c.custom_span_attributes = -> { { 'team' => 'platform' } }
-    end
-    proc = new_processor
-    span = FakeSpan.new
-    proc.on_start(span, nil)
-    refute span.attributes.key?('code.namespace')
-    assert_equal 'platform', span.attributes['team']
   end
 
   def test_custom_attributes_coexist_with_call_context

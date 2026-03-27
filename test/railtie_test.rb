@@ -8,13 +8,11 @@ require 'tmpdir'
 require 'rails_otel_context/railtie'
 
 class RailtieTest < Minitest::Test
-  include EnvHelpers
-
   def setup
     RailsOtelContext.reset_configuration!
   end
 
-  def test_railtie_applies_env_and_installs_adapters_on_active_record_load
+  def test_railtie_installs_adapters_on_active_record_load
     app_root = Dir.mktmpdir('rails_otel_context_dummy_app')
     FileUtils.mkdir_p(File.join(app_root, 'config'))
 
@@ -23,11 +21,7 @@ class RailtieTest < Minitest::Test
     adapters_singleton.class_eval do
       alias_method :__rails_otel_context_original_install, :install!
       define_method(:install!) do |app_root:, config:|
-        install_calls << {
-          app_root: app_root.to_s,
-          pg_enabled: config.pg_slow_query_enabled,
-          pg_threshold: config.pg_slow_query_threshold_ms
-        }
+        install_calls << { app_root: app_root.to_s }
       end
     end
 
@@ -39,19 +33,12 @@ class RailtieTest < Minitest::Test
       config.secret_key_base = 'x' * 64
     end
 
-    with_env(
-      'RAILS_OTEL_CONTEXT_PG_SLOW_QUERY_ENABLED' => 'true',
-      'RAILS_OTEL_CONTEXT_PG_SLOW_QUERY_MS' => '321.0'
-    ) do
-      app = app_class.instance
-      app.initialize!
-      ActiveSupport.run_load_hooks(:active_record, Object.new)
-    end
+    app = app_class.instance
+    app.initialize!
+    ActiveSupport.run_load_hooks(:active_record, Object.new)
 
     assert_equal 1, install_calls.size
     assert_equal app_root, install_calls[0][:app_root]
-    assert_equal true, install_calls[0][:pg_enabled]
-    assert_equal 321.0, install_calls[0][:pg_threshold]
   ensure
     adapters_singleton.class_eval do
       alias_method :install!, :__rails_otel_context_original_install

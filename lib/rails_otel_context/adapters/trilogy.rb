@@ -5,11 +5,11 @@ module RailsOtelContext
     module Trilogy
       module_function
 
-      def install!(app_root:, threshold_ms:)
+      def install!(app_root:)
         return unless defined?(::Trilogy)
 
         patch_module = patch_module_for
-        patch_module.configure(app_root: app_root, threshold_ms: threshold_ms)
+        patch_module.configure(app_root: app_root)
 
         return if ::Trilogy.ancestors.include?(patch_module)
 
@@ -25,32 +25,24 @@ module RailsOtelContext
           class << self
             include RailsOtelContext::SourceLocation
 
-            attr_accessor :app_root, :threshold_ms
+            attr_accessor :app_root
 
-            def configure(app_root:, threshold_ms:)
+            def configure(app_root:)
               @app_root = app_root.to_s
-              @threshold_ms = threshold_ms.to_f
             end
           end
 
           # AR context attributes and span renaming are handled by
           # CallContextProcessor.apply_db_context (via sql.active_record notification).
-          # This adapter only handles slow query source location tracking.
+          # This adapter adds source location to every query span.
           define_method(:query) do |sql|
             source = mod.source_location_for_app
-            started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
             result = super(sql)
-            duration_ms = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - started_at) * 1000.0
 
             span = OpenTelemetry::Trace.current_span
-            if span.context.valid?
-              threshold = RailsOtelContext.configuration.trilogy_slow_query_threshold_ms
-              if source && duration_ms >= threshold
-                span.set_attribute('code.filepath', source[0])
-                span.set_attribute('code.lineno', source[1])
-                span.set_attribute('db.query.duration_ms', duration_ms.round(1))
-                span.set_attribute('db.query.slow_threshold_ms', threshold)
-              end
+            if span.context.valid? && source
+              span.set_attribute('code.filepath', source[0])
+              span.set_attribute('code.lineno', source[1])
             end
 
             result

@@ -3,8 +3,6 @@
 require_relative 'test_helper'
 
 class RequestContextTest < Minitest::Test
-  include EnvHelpers
-
   def setup
     RailsOtelContext.reset_configuration!
     RailsOtelContext::RequestContext.clear!
@@ -43,7 +41,6 @@ class RequestContextTest < Minitest::Test
 
   def test_request_context_propagated_to_all_spans
     RailsOtelContext.configure do |c|
-      c.call_context_enabled = false
       c.request_context_enabled = true
     end
     processor = RailsOtelContext::CallContextProcessor.new(app_root: @app_root)
@@ -72,7 +69,6 @@ class RequestContextTest < Minitest::Test
 
   def test_no_attributes_when_request_context_not_set
     RailsOtelContext.configure do |c|
-      c.call_context_enabled = false
       c.request_context_enabled = true
     end
     processor = RailsOtelContext::CallContextProcessor.new(app_root: @app_root)
@@ -85,7 +81,6 @@ class RequestContextTest < Minitest::Test
 
   def test_no_attributes_when_feature_disabled
     RailsOtelContext.configure do |c|
-      c.call_context_enabled = false
       c.request_context_enabled = false
     end
     processor = RailsOtelContext::CallContextProcessor.new(app_root: @app_root)
@@ -100,7 +95,6 @@ class RequestContextTest < Minitest::Test
 
   def test_cleanup_after_request_prevents_leakage
     RailsOtelContext.configure do |c|
-      c.call_context_enabled = false
       c.request_context_enabled = true
     end
     processor = RailsOtelContext::CallContextProcessor.new(app_root: @app_root)
@@ -122,7 +116,6 @@ class RequestContextTest < Minitest::Test
 
   def test_coexists_with_call_context_and_custom_attributes
     RailsOtelContext.configure do |c|
-      c.call_context_enabled = false # isolate
       c.request_context_enabled = true
       c.custom_span_attributes = -> { { 'env' => 'production' } }
     end
@@ -135,13 +128,6 @@ class RequestContextTest < Minitest::Test
     assert_equal 'UsersController', span.attributes['request.controller']
     assert_equal 'update', span.attributes['request.action']
     assert_equal 'production', span.attributes['env']
-  end
-
-  def test_env_var_enables_request_context
-    with_env('RAILS_OTEL_CONTEXT_REQUEST_CONTEXT_ENABLED' => 'true') do
-      config = RailsOtelContext.apply_env_configuration!
-      assert_equal true, config.request_context_enabled
-    end
   end
 
   def test_default_request_context_is_disabled

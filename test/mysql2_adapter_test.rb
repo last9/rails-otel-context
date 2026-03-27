@@ -13,10 +13,9 @@ class Mysql2AdapterTest < Minitest::Test
     RailsOtelContext::Adapters::Mysql2.instance_variable_set(:@patch_module, nil)
   end
 
-  def test_query_sets_source_attributes_for_slow_queries
+  def test_query_sets_source_attributes
     patch = RailsOtelContext::Adapters::Mysql2.send(:build_patch_module)
-    RailsOtelContext.configure { |c| c.mysql2_slow_query_threshold_ms = 0.0 }
-    patch.configure(app_root: Dir.pwd, threshold_ms: 0.0)
+    patch.configure(app_root: Dir.pwd)
 
     client_class = new_client_class
     client_class.prepend(patch)
@@ -28,16 +27,13 @@ class Mysql2AdapterTest < Minitest::Test
         assert_equal :ok_query, result
         assert_equal 'app/services/payment.rb', span.attributes['code.filepath']
         assert_equal 33, span.attributes['code.lineno']
-        assert span.attributes.key?('db.query.duration_ms')
-        assert_equal 0.0, span.attributes['db.query.slow_threshold_ms']
       end
     end
   end
 
-  def test_prepare_sets_source_attributes_for_slow_queries
+  def test_prepare_sets_source_attributes
     patch = RailsOtelContext::Adapters::Mysql2.send(:build_patch_module)
-    RailsOtelContext.configure { |c| c.mysql2_slow_query_threshold_ms = 0.0 }
-    patch.configure(app_root: Dir.pwd, threshold_ms: 0.0)
+    patch.configure(app_root: Dir.pwd)
 
     client_class = new_client_class
     client_class.prepend(patch)
@@ -53,28 +49,9 @@ class Mysql2AdapterTest < Minitest::Test
     end
   end
 
-  def test_query_skips_attributes_for_fast_queries
-    patch = RailsOtelContext::Adapters::Mysql2.send(:build_patch_module)
-    RailsOtelContext.configure { |c| c.mysql2_slow_query_threshold_ms = 999_999.0 }
-    patch.configure(app_root: Dir.pwd, threshold_ms: 999_999.0)
-
-    client_class = new_client_class
-    client_class.prepend(patch)
-    client = client_class.new
-
-    with_thread_source('/app/services/payment.rb', 22) do
-      with_current_span_with_valid_context do |span|
-        client.query('SELECT 1')
-        refute span.attributes.key?('code.filepath')
-        refute span.attributes.key?('code.lineno')
-      end
-    end
-  end
-
   def test_query_skips_all_attributes_when_span_context_invalid
     patch = RailsOtelContext::Adapters::Mysql2.send(:build_patch_module)
-    RailsOtelContext.configure { |c| c.mysql2_slow_query_threshold_ms = 0.0 }
-    patch.configure(app_root: Dir.pwd, threshold_ms: 0.0)
+    patch.configure(app_root: Dir.pwd)
 
     client_class = new_client_class
     client_class.prepend(patch)
@@ -93,7 +70,6 @@ class Mysql2AdapterTest < Minitest::Test
 
       client.query('SELECT 1')
       refute fake_span.attributes.key?('code.filepath')
-      refute fake_span.attributes.key?('db.query.duration_ms')
     ensure
       singleton.class_eval do
         alias_method :current_span, :__mysql2_test_orig_span
@@ -135,18 +111,6 @@ class Mysql2AdapterTest < Minitest::Test
       end
     else
       thread_singleton.class_eval { remove_method :each_caller_location }
-    end
-  end
-
-  def with_ar_context(context)
-    mod = RailsOtelContext::ActiveRecordContext
-    mod.singleton_class.class_eval { alias_method :__ar_ctx_orig_extract, :extract }
-    mod.define_singleton_method(:extract) { |**| context }
-    yield
-  ensure
-    mod.singleton_class.class_eval do
-      alias_method :extract, :__ar_ctx_orig_extract
-      remove_method :__ar_ctx_orig_extract
     end
   end
 

@@ -26,22 +26,6 @@ class FakeSpan
   end
 end
 
-module EnvHelpers
-  def with_env(vars)
-    previous = {}
-    vars.each do |key, value|
-      previous[key] = ENV.key?(key) ? ENV[key] : :__unset__
-      value.nil? ? ENV.delete(key) : ENV[key] = value
-    end
-
-    yield
-  ensure
-    previous.each do |key, value|
-      value == :__unset__ ? ENV.delete(key) : ENV[key] = value
-    end
-  end
-end
-
 module CallerLocationHelpers
   def location(path, label, lineno = nil)
     OpenStruct.new(absolute_path: path, path: path, label: label, lineno: lineno)
