@@ -41,7 +41,7 @@ Navigate straight to the offending line. No grepping required.
 ## Installation
 
 ```ruby
-gem 'rails-otel-context', '~> 0.5'
+gem 'rails-otel-context', '~> 0.6'
 ```
 
 That's it. Adapters install automatically when ActiveRecord loads.
