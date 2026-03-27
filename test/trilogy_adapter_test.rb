@@ -13,10 +13,9 @@ class TrilogyAdapterTest < Minitest::Test
     RailsOtelContext::Adapters::Trilogy.instance_variable_set(:@patch_module, nil)
   end
 
-  def test_query_sets_source_attributes_for_slow_queries
-    RailsOtelContext.configure { |c| c.trilogy_slow_query_threshold_ms = 0.0 }
+  def test_query_sets_source_attributes
     patch = RailsOtelContext::Adapters::Trilogy.send(:build_patch_module)
-    patch.configure(app_root: Dir.pwd, threshold_ms: 0.0)
+    patch.configure(app_root: Dir.pwd)
 
     client_class = new_client_class
     client_class.prepend(patch)
@@ -28,34 +27,13 @@ class TrilogyAdapterTest < Minitest::Test
         assert_equal :ok_query, result
         assert_equal 'app/services/payment.rb', span.attributes['code.filepath']
         assert_equal 33, span.attributes['code.lineno']
-        assert span.attributes.key?('db.query.duration_ms')
-        assert_equal 0.0, span.attributes['db.query.slow_threshold_ms']
-      end
-    end
-  end
-
-  def test_query_skips_attributes_for_fast_queries
-    RailsOtelContext.configure { |c| c.trilogy_slow_query_threshold_ms = 999_999.0 }
-    patch = RailsOtelContext::Adapters::Trilogy.send(:build_patch_module)
-    patch.configure(app_root: Dir.pwd, threshold_ms: 999_999.0)
-
-    client_class = new_client_class
-    client_class.prepend(patch)
-    client = client_class.new
-
-    with_thread_source('/app/services/payment.rb', 22) do
-      with_current_span_with_valid_context do |span|
-        client.query('SELECT 1')
-        refute span.attributes.key?('code.filepath')
-        refute span.attributes.key?('code.lineno')
       end
     end
   end
 
   def test_query_skips_when_span_context_invalid
     patch = RailsOtelContext::Adapters::Trilogy.send(:build_patch_module)
-    RailsOtelContext.configure { |c| c.trilogy_slow_query_threshold_ms = 0.0 }
-    patch.configure(app_root: Dir.pwd, threshold_ms: 0.0)
+    patch.configure(app_root: Dir.pwd)
 
     client_class = new_client_class
     client_class.prepend(patch)
@@ -72,14 +50,12 @@ class TrilogyAdapterTest < Minitest::Test
 
   def test_query_skips_source_attributes_when_no_source_location
     patch = RailsOtelContext::Adapters::Trilogy.send(:build_patch_module)
-    RailsOtelContext.configure { |c| c.trilogy_slow_query_threshold_ms = 0.0 }
-    patch.configure(app_root: Dir.pwd, threshold_ms: 0.0)
+    patch.configure(app_root: Dir.pwd)
 
     client_class = new_client_class
     client_class.prepend(patch)
     client = client_class.new
 
-    # Stub source_location_for_app to return nil (no app source found)
     patch.define_singleton_method(:source_location_for_app) { nil }
 
     with_current_span_with_valid_context do |span|
@@ -91,7 +67,7 @@ class TrilogyAdapterTest < Minitest::Test
 
   def test_install_skips_when_trilogy_not_defined
     refute defined?(::Trilogy), '::Trilogy should not be defined in test environment'
-    RailsOtelContext::Adapters::Trilogy.install!(app_root: Dir.pwd, threshold_ms: 200.0)
+    RailsOtelContext::Adapters::Trilogy.install!(app_root: Dir.pwd)
   end
 
   def test_install_does_not_double_prepend
@@ -104,15 +80,12 @@ class TrilogyAdapterTest < Minitest::Test
     Object.const_set(:Trilogy, stub_trilogy)
 
     patch = RailsOtelContext::Adapters::Trilogy.patch_module_for
-    RailsOtelContext.configure { |c| c.trilogy_slow_query_threshold_ms = 200.0 }
-    patch.configure(app_root: Dir.pwd, threshold_ms: 200.0)
+    patch.configure(app_root: Dir.pwd)
 
-    # Install once
-    RailsOtelContext::Adapters::Trilogy.install!(app_root: Dir.pwd, threshold_ms: 200.0)
+    RailsOtelContext::Adapters::Trilogy.install!(app_root: Dir.pwd)
     ancestors_after_first = stub_trilogy.ancestors.dup
 
-    # Install again — should not prepend a second time
-    RailsOtelContext::Adapters::Trilogy.install!(app_root: Dir.pwd, threshold_ms: 200.0)
+    RailsOtelContext::Adapters::Trilogy.install!(app_root: Dir.pwd)
     ancestors_after_second = stub_trilogy.ancestors.dup
 
     assert_equal ancestors_after_first, ancestors_after_second
@@ -189,16 +162,5 @@ class TrilogyAdapterTest < Minitest::Test
       alias_method :current_span, :__rails_otel_context_original_current_span
       remove_method :__rails_otel_context_original_current_span
     end
-  end
-
-  def with_activerecord_context(model_name:, method_name:)
-    original = RailsOtelContext::ActiveRecordContext.method(:extract)
-    RailsOtelContext::ActiveRecordContext.define_singleton_method(:extract) do |**_kwargs|
-      { model_name: model_name, method_name: method_name }
-    end
-
-    yield
-  ensure
-    RailsOtelContext::ActiveRecordContext.define_singleton_method(:extract, original)
   end
 end

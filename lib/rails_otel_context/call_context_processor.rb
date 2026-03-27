@@ -18,6 +18,8 @@ module RailsOtelContext
   # of every span creation. Exceptions in the callable are silently rescued to avoid
   # disrupting application request processing.
   class CallContextProcessor
+    HAS_EACH_CALLER_LOCATION = Thread.respond_to?(:each_caller_location)
+
     SPAN_CONTROLLER_ATTR = 'request.controller'
     SPAN_ACTION_ATTR     = 'request.action'
     AR_MODEL_ATTR        = 'code.activerecord.model'
@@ -27,16 +29,13 @@ module RailsOtelContext
 
     def initialize(app_root:, config: RailsOtelContext.configuration)
       @app_root = app_root.to_s
-      @call_context_enabled = config.call_context_enabled
       @request_context_enabled = config.request_context_enabled
       @custom_span_attributes = config.custom_span_attributes
-      @custom_span_attributes_enabled = config.custom_span_attributes_enabled
       @span_name_formatter = config.span_name_formatter
-      @has_each_caller_location = Thread.respond_to?(:each_caller_location)
     end
 
     def on_start(span, _parent_context)
-      apply_call_context(span) if @call_context_enabled
+      apply_call_context(span)
       apply_request_context(span) if @request_context_enabled
       apply_db_context(span)
       apply_custom_attributes(span) if @custom_span_attributes
@@ -51,7 +50,7 @@ module RailsOtelContext
     private
 
     def apply_call_context(span)
-      return unless @has_each_caller_location
+      return unless HAS_EACH_CALLER_LOCATION
 
       context = extract_caller_context
       return unless context
@@ -110,8 +109,6 @@ module RailsOtelContext
     end
 
     def apply_custom_attributes(span)
-      return unless @custom_span_attributes_enabled
-
       attrs = @custom_span_attributes.call
       return unless attrs.is_a?(Hash) && !attrs.empty?
 

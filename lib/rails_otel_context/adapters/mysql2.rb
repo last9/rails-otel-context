@@ -5,11 +5,11 @@ module RailsOtelContext
     module Mysql2
       module_function
 
-      def install!(app_root:, threshold_ms:)
+      def install!(app_root:)
         return unless defined?(::Mysql2::Client)
 
         patch_module = patch_module_for
-        patch_module.configure(app_root: app_root, threshold_ms: threshold_ms)
+        patch_module.configure(app_root: app_root)
 
         return if ::Mysql2::Client.ancestors.include?(patch_module)
 
@@ -25,54 +25,23 @@ module RailsOtelContext
           class << self
             include RailsOtelContext::SourceLocation
 
-            attr_accessor :app_root, :threshold_ms
+            attr_accessor :app_root
 
-            def configure(app_root:, threshold_ms:)
+            def configure(app_root:)
               @app_root = app_root.to_s
-              @threshold_ms = threshold_ms.to_f
             end
           end
 
           # AR context and span renaming handled by CallContextProcessor.apply_db_context.
-          # Adapters only handle slow query source location tracking.
-          define_method(:query) do |sql, options = {}|
-            source = mod.source_location_for_app
-            started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-            result = super(sql, options)
-            duration_ms = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - started_at) * 1000.0
+          %i[query prepare].each do |method_name|
+            define_method(method_name) do |*args|
+              result = super(*args)
 
-            span = OpenTelemetry::Trace.current_span
-            if span.context.valid?
-              threshold = RailsOtelContext.configuration.mysql2_slow_query_threshold_ms
-              if source && duration_ms >= threshold
-                span.set_attribute('code.filepath', source[0])
-                span.set_attribute('code.lineno', source[1])
-                span.set_attribute('db.query.duration_ms', duration_ms.round(1))
-                span.set_attribute('db.query.slow_threshold_ms', threshold)
-              end
+              span = OpenTelemetry::Trace.current_span
+              mod.apply_source_to_span(span, mod.source_location_for_app) if span.context.valid?
+
+              result
             end
-
-            result
-          end
-
-          define_method(:prepare) do |sql|
-            source = mod.source_location_for_app
-            started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-            result = super(sql)
-            duration_ms = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - started_at) * 1000.0
-
-            span = OpenTelemetry::Trace.current_span
-            if span.context.valid?
-              threshold = RailsOtelContext.configuration.mysql2_slow_query_threshold_ms
-              if source && duration_ms >= threshold
-                span.set_attribute('code.filepath', source[0])
-                span.set_attribute('code.lineno', source[1])
-                span.set_attribute('db.query.duration_ms', duration_ms.round(1))
-                span.set_attribute('db.query.slow_threshold_ms', threshold)
-              end
-            end
-
-            result
           end
         end
 

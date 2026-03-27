@@ -7,12 +7,13 @@ class ClickhouseAdapterTest < Minitest::Test
   include SpanHelpers
 
   def setup
+    RailsOtelContext.reset_configuration!
     RailsOtelContext::Adapters::Clickhouse.instance_variable_set(:@patch_modules, nil)
   end
 
-  def test_query_creates_span_with_slow_source_attributes
+  def test_query_creates_span_with_source_attributes
     patch = RailsOtelContext::Adapters::Clickhouse.send(:build_patch_module, [:query])
-    patch.configure(app_root: Dir.pwd, threshold_ms: 0.0)
+    patch.configure(app_root: Dir.pwd)
 
     client_class = Class.new do
       def query(_sql)
@@ -38,9 +39,9 @@ class ClickhouseAdapterTest < Minitest::Test
     end
   end
 
-  def test_query_omits_slow_source_attributes_when_below_threshold
+  def test_query_omits_source_attributes_when_no_app_source
     patch = RailsOtelContext::Adapters::Clickhouse.send(:build_patch_module, [:query])
-    patch.configure(app_root: Dir.pwd, threshold_ms: 999_999.0)
+    patch.configure(app_root: '/unlikely/root')
 
     client_class = Class.new do
       def query(_sql)
@@ -49,80 +50,15 @@ class ClickhouseAdapterTest < Minitest::Test
     end
     client_class.prepend(patch)
 
-    with_thread_source('/app/services/warehouse.rb', 18) do
-      with_tracer_spy do |calls|
-        client_class.new.query('SELECT 1')
-        span = calls[0]
-        refute span[:attributes].key?('code.filepath')
-        refute span[:attributes].key?('code.lineno')
-      end
-    end
-  end
-
-  def test_query_sets_activerecord_context_for_slow_queries
-    patch = RailsOtelContext::Adapters::Clickhouse.send(:build_patch_module, [:query])
-    patch.configure(app_root: Dir.pwd, threshold_ms: 0.0)
-
-    client_class = Class.new do
-      def query(_sql)
-        :ok
-      end
-    end
-    client_class.prepend(patch)
-
-    with_thread_source('/app/services/warehouse.rb', 22) do
-      with_ar_context({ model_name: 'Event', method_name: 'select' }) do
-        with_tracer_spy do |calls|
-          client_class.new.query('SELECT count(*) FROM events')
-          span = calls[0]
-          assert_equal 'Event', span[:attributes]['code.activerecord.model']
-          assert_equal 'select', span[:attributes]['code.activerecord.method']
-        end
-      end
-    end
-  end
-
-  def test_query_always_sets_activerecord_context_regardless_of_threshold
-    # Unlike PG/MySQL2, ClickHouse sets AR context unconditionally (not gated by slow threshold).
-    patch = RailsOtelContext::Adapters::Clickhouse.send(:build_patch_module, [:query])
-    patch.configure(app_root: Dir.pwd, threshold_ms: 999_999.0)
-
-    client_class = Class.new do
-      def query(_sql)
-        :ok
-      end
-    end
-    client_class.prepend(patch)
-
-    with_thread_source('/app/services/warehouse.rb', 22) do
-      with_ar_context({ model_name: 'Event', method_name: 'select' }) do
-        with_tracer_spy do |calls|
-          client_class.new.query('SELECT count(*) FROM events')
-          span = calls[0]
-          # AR context always present
-          assert_equal 'Event', span[:attributes]['code.activerecord.model']
-          assert_equal 'select', span[:attributes]['code.activerecord.method']
-          # Source location gated by threshold
-          refute span[:attributes].key?('code.filepath')
-          refute span[:attributes].key?('code.lineno')
-        end
-      end
+    with_tracer_spy do |calls|
+      client_class.new.query('SELECT 1')
+      span = calls[0]
+      refute span[:attributes].key?('code.filepath')
+      refute span[:attributes].key?('code.lineno')
     end
   end
 
   private
-
-  def with_ar_context(context)
-    mod = RailsOtelContext::ActiveRecordContext
-    mod.singleton_class.class_eval { alias_method :__ar_ctx_orig_extract, :extract }
-    mod.define_singleton_method(:extract) { |**| context }
-    yield
-  ensure
-    mod.singleton_class.class_eval do
-      alias_method :extract, :__ar_ctx_orig_extract
-      remove_method :__ar_ctx_orig_extract
-    end
-  end
 
   def with_thread_source(path, lineno)
     thread_singleton = Thread.singleton_class

@@ -51,7 +51,6 @@ class CustomSpanAttributesIntegrationTest < Minitest::Test
 
   def test_team_propagates_to_all_child_spans
     RailsOtelContext.configure do |c|
-      c.call_context_enabled = false # isolate custom attributes test
       c.custom_span_attributes = lambda {
         team = FakeCurrent.team
         team ? { 'team' => team } : nil
@@ -84,7 +83,6 @@ class CustomSpanAttributesIntegrationTest < Minitest::Test
 
   def test_different_requests_get_different_teams
     RailsOtelContext.configure do |c|
-      c.call_context_enabled = false
       c.custom_span_attributes = lambda {
         team = FakeCurrent.team
         team ? { 'team' => team } : nil
@@ -112,7 +110,6 @@ class CustomSpanAttributesIntegrationTest < Minitest::Test
 
   def test_no_team_set_means_no_attribute
     RailsOtelContext.configure do |c|
-      c.call_context_enabled = false
       c.custom_span_attributes = lambda {
         team = FakeCurrent.team
         team ? { 'team' => team } : nil
@@ -126,17 +123,13 @@ class CustomSpanAttributesIntegrationTest < Minitest::Test
   end
 
   # -------------------------------------------------------------------
-  # Env var kill switch — instant rollback without redeploy
+  # Kill switch — set custom_span_attributes = nil to disable
   # -------------------------------------------------------------------
 
-  def test_env_var_disables_custom_attributes_at_runtime
+  def test_nil_custom_span_attributes_disables_callback
     call_count = 0
     RailsOtelContext.configure do |c|
-      c.custom_span_attributes = lambda {
-        call_count += 1
-        { 'team' => 'billing' }
-      }
-      c.custom_span_attributes_enabled = false # simulates env var = false
+      c.custom_span_attributes = nil
     end
 
     FakeCurrent.team = 'billing'
@@ -144,7 +137,7 @@ class CustomSpanAttributesIntegrationTest < Minitest::Test
     span = FakeSpan.new
     new_processor.on_start(span, nil)
 
-    assert_equal 0, call_count, 'callback should not be invoked when disabled'
+    assert_equal 0, call_count, 'callback should not be invoked when nil'
     refute span.attributes.key?('team')
   end
 
@@ -155,7 +148,6 @@ class CustomSpanAttributesIntegrationTest < Minitest::Test
   def test_frozen_hash_values_work
     frozen_attrs = { 'team' => 'billing', 'region' => 'us-east' }.freeze
     RailsOtelContext.configure do |c|
-      c.call_context_enabled = false
       c.custom_span_attributes = -> { frozen_attrs }
     end
 
@@ -171,7 +163,6 @@ class CustomSpanAttributesIntegrationTest < Minitest::Test
 
   def test_custom_attributes_with_code_context_full_flow
     RailsOtelContext.configure do |c|
-      c.call_context_enabled = true
       c.custom_span_attributes = lambda {
         team = FakeCurrent.team
         team ? { 'team' => team } : nil
@@ -199,7 +190,6 @@ class CustomSpanAttributesIntegrationTest < Minitest::Test
 
   def test_broken_callback_does_not_prevent_code_context
     RailsOtelContext.configure do |c|
-      c.call_context_enabled = true
       c.custom_span_attributes = -> { raise NoMethodError, 'undefined method `team` for nil' }
     end
 
