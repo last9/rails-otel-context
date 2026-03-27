@@ -1,7 +1,7 @@
 # rails-otel-context
 
 [![CI](https://github.com/last9/rails-otel-context/actions/workflows/ci.yml/badge.svg)](https://github.com/last9/rails-otel-context/actions/workflows/ci.yml)
-[![Gem Version](https://badge.fury.io/rb/rails-otel-context.svg)](https://badge.fury.io/rb/rails-otel-context)
+[![Gem Version](https://img.shields.io/gem/v/rails-otel-context)](https://rubygems.org/gems/rails-otel-context)
 
 Enriches OpenTelemetry spans in Rails with source location, ActiveRecord model context, and caller identity. Works automatically via a Railtie — no setup required.
 
