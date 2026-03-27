@@ -43,18 +43,12 @@ module RailsOtelContext
           end
 
           # AR context and span renaming handled by CallContextProcessor.apply_db_context.
-          # This adapter adds source location to every query span.
           methods.each do |method_name|
             define_method(method_name) do |*args, &user_block|
               source = mod.source_location_for_app
 
               super(*args) do |result|
-                if source
-                  span = OpenTelemetry::Trace.current_span
-                  span.set_attribute('code.filepath', source[0])
-                  span.set_attribute('code.lineno', source[1])
-                end
-
+                mod.apply_source_to_span(OpenTelemetry::Trace.current_span, source)
                 user_block ? user_block.call(result) : result
               end
             end

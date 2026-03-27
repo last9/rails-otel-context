@@ -18,6 +18,8 @@ module RailsOtelContext
   # of every span creation. Exceptions in the callable are silently rescued to avoid
   # disrupting application request processing.
   class CallContextProcessor
+    HAS_EACH_CALLER_LOCATION = Thread.respond_to?(:each_caller_location)
+
     SPAN_CONTROLLER_ATTR = 'request.controller'
     SPAN_ACTION_ATTR     = 'request.action'
     AR_MODEL_ATTR        = 'code.activerecord.model'
@@ -30,7 +32,6 @@ module RailsOtelContext
       @request_context_enabled = config.request_context_enabled
       @custom_span_attributes = config.custom_span_attributes
       @span_name_formatter = config.span_name_formatter
-      @has_each_caller_location = Thread.respond_to?(:each_caller_location)
     end
 
     def on_start(span, _parent_context)
@@ -49,7 +50,7 @@ module RailsOtelContext
     private
 
     def apply_call_context(span)
-      return unless @has_each_caller_location
+      return unless HAS_EACH_CALLER_LOCATION
 
       context = extract_caller_context
       return unless context

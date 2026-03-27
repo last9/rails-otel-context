@@ -34,7 +34,7 @@ module RailsOtelContext
         clients << ::ClickHouse::Connection if defined?(::ClickHouse::Connection)
         clients << ::Clickhouse::Client if defined?(::Clickhouse::Client)
 
-        clients.compact.uniq
+        clients.uniq
       end
 
       def patch_module_for(klass, methods)
@@ -55,9 +55,7 @@ module RailsOtelContext
             end
           end
 
-          # AR context, span renaming, and l9.orig.name are handled by
-          # CallContextProcessor.apply_db_context (via sql.active_record notification).
-          # This adapter creates ClickHouse spans and adds source location to each.
+          # AR context and span renaming handled by CallContextProcessor.apply_db_context.
           reentrancy_key = RailsOtelContext::Adapters::Clickhouse::REENTRANCY_KEY
 
           methods.each do |method_name|
@@ -78,12 +76,7 @@ module RailsOtelContext
                 span.set_attribute('db.statement', statement) if statement
 
                 result = super(*args, &block)
-
-                if source
-                  span.set_attribute('code.filepath', source[0])
-                  span.set_attribute('code.lineno', source[1])
-                end
-
+                mod.apply_source_to_span(span, source)
                 result
               end
             ensure
