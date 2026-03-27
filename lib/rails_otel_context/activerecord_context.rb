@@ -114,6 +114,5 @@ module RailsOtelContext
 
       { model_name: model_name, method_name: method_name }
     end
-
   end
 end

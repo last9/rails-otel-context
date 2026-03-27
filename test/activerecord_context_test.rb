@@ -92,6 +92,4 @@ class ActiveRecordContextTest < Minitest::Test
     ctx = RailsOtelContext::ActiveRecordContext.current
     assert_nil ctx[:scope_name]
   end
-
-
 end

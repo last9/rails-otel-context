@@ -28,6 +28,5 @@ module RailsOtelContext
     def reset_configuration!
       @configuration = Configuration.new
     end
-
   end
 end

@@ -20,7 +20,7 @@ class RailtieTest < Minitest::Test
     adapters_singleton = RailsOtelContext::Adapters.singleton_class
     adapters_singleton.class_eval do
       alias_method :__rails_otel_context_original_install, :install!
-      define_method(:install!) do |app_root:, config:|
+      define_method(:install!) do |app_root:, **|
         install_calls << { app_root: app_root.to_s }
       end
     end
