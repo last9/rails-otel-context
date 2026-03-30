@@ -191,7 +191,7 @@ class ActiveRecordContextTest < Minitest::Test
 
   def test_apply_to_span_applies_formatter_and_preserves_original_name
     RailsOtelContext.configure do |c|
-      c.span_name_formatter = ->(orig, ar) { "#{ar[:model_name]}.#{ar[:method_name]}" }
+      c.span_name_formatter = ->(_orig, ar) { "#{ar[:model_name]}.#{ar[:method_name]}" }
     end
 
     span = FakeSpan.new(valid_context: true)
@@ -207,7 +207,7 @@ class ActiveRecordContextTest < Minitest::Test
 
   def test_apply_to_span_reads_code_namespace_from_span_for_formatter
     RailsOtelContext.configure do |c|
-      c.span_name_formatter = ->(orig, ar) { "#{ar[:code_namespace]}##{ar[:model_name]}" }
+      c.span_name_formatter = ->(_orig, ar) { "#{ar[:code_namespace]}##{ar[:model_name]}" }
     end
 
     span = FakeSpan.new(valid_context: true)

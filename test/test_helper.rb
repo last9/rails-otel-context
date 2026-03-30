@@ -21,17 +21,13 @@ class FakeSpanContext
 end
 
 class FakeSpan
-  attr_reader :attributes
+  attr_reader :attributes, :context
   attr_accessor :name
 
   def initialize(valid_context: true)
     @attributes = {}
     @name = 'SELECT'
     @context = FakeSpanContext.new(valid_context)
-  end
-
-  def context
-    @context
   end
 
   def set_attribute(key, value)
