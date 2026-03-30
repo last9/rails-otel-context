@@ -8,7 +8,7 @@ module RailsOtelContext
     initializer 'rails_otel_context.install_adapters' do
       ActiveSupport.on_load(:active_record) do
         RailsOtelContext::Adapters.install!(app_root: Rails.root, config: RailsOtelContext.configuration)
-        RailsOtelContext::ActiveRecordContext.install!
+        RailsOtelContext::ActiveRecordContext.install!(app_root: Rails.root)
       end
     end
 

@@ -17,6 +17,46 @@ module RailsOtelContext
     SCOPE_THREAD_KEY = :_rails_otel_ctx_scope
     private_constant :THREAD_KEY, :SCOPE_THREAD_KEY
 
+    # Tracks class methods (def self.name) that return an AR::Relation so their
+    # name is captured as code.activerecord.scope, complementing ScopeNameTracking
+    # which only handles the scope macro. Uses singleton_method_added to intercept
+    # methods after definition and source_location to skip Rails/gem internals.
+    module ClassMethodScopeTracking
+      def singleton_method_added(name)
+        super
+
+        @_otel_wrapped_class_methods ||= {}
+        return if @_otel_wrapped_class_methods[name]
+
+        app_root = RailsOtelContext::ActiveRecordContext.app_root
+        return unless app_root
+
+        begin
+          loc = method(name).source_location
+        rescue NameError
+          return
+        end
+        loc_path = File.expand_path(loc[0])
+        return unless loc_path.start_with?(app_root)
+        return if loc_path.include?('/gems/')
+
+        # Mark before define_singleton_method to prevent re-entrancy for this name
+        @_otel_wrapped_class_methods[name] = true
+        name_str = name.to_s.freeze
+        original = method(name)
+
+        define_singleton_method(name) do |*args, **kwargs, &blk|
+          result = original.call(*args, **kwargs, &blk)
+          if defined?(::ActiveRecord::Relation) && result.is_a?(::ActiveRecord::Relation)
+            result.instance_variable_set(:@_otel_scope_name, name_str)
+          end
+          result
+        end
+      rescue StandardError
+        nil
+      end
+    end
+
     # Subscriber for sql.active_record notifications.
     class Subscriber
       def start(_name, _id, payload)
@@ -81,13 +121,20 @@ module RailsOtelContext
 
     module_function
 
-    def install!
+    def install!(app_root: nil)
+      @app_root = File.expand_path(app_root.to_s) if app_root
+
       return unless defined?(::ActiveSupport::Notifications)
       return unless defined?(::ActiveRecord::Base)
 
       ActiveSupport::Notifications.subscribe('sql.active_record', Subscriber.new)
       ::ActiveRecord::Base.extend(ScopeNameTracking)
+      ::ActiveRecord::Base.extend(ClassMethodScopeTracking)
       ::ActiveRecord::Relation.prepend(RelationScopeCapture)
+    end
+
+    def app_root
+      @app_root
     end
 
     def current

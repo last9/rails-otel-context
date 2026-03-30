@@ -219,4 +219,66 @@ class ActiveRecordContextTest < Minitest::Test
   ensure
     RailsOtelContext.reset_configuration!
   end
+
+  # ClassMethodScopeTracking
+
+  def test_class_method_returning_relation_sets_scope_name
+    app_root = File.expand_path('..', __dir__)
+    RailsOtelContext::ActiveRecordContext.install!(app_root: app_root)
+
+    model_class = Class.new do
+      extend RailsOtelContext::ActiveRecordContext::ClassMethodScopeTracking
+
+      def self.active
+        FakeRelation.new
+      end
+    end
+
+    result = model_class.active
+    assert_equal 'active', result.otel_scope_name
+  end
+
+  def test_class_method_not_returning_relation_skips_scope_name
+    app_root = File.expand_path('..', __dir__)
+    RailsOtelContext::ActiveRecordContext.install!(app_root: app_root)
+
+    model_class = Class.new do
+      extend RailsOtelContext::ActiveRecordContext::ClassMethodScopeTracking
+
+      def self.count
+        42
+      end
+    end
+
+    result = model_class.count
+    assert_equal 42, result
+  end
+
+  def test_class_method_scope_end_to_end_via_subscriber
+    app_root = File.expand_path('..', __dir__)
+    RailsOtelContext::ActiveRecordContext.install!(app_root: app_root)
+
+    model_class = Class.new do
+      extend RailsOtelContext::ActiveRecordContext::ClassMethodScopeTracking
+
+      def self.active
+        FakeRelation.new
+      end
+    end
+
+    # Simulate what RelationScopeCapture does: push scope to thread-local before exec_queries
+    relation = model_class.active
+    scope_name = relation.instance_variable_get(:@_otel_scope_name)
+    Thread.current[:_rails_otel_ctx_scope] = scope_name
+
+    sub = RailsOtelContext::ActiveRecordContext::Subscriber.new
+    sub.start('sql.active_record', '1', { name: 'Widget Load' })
+
+    ctx = RailsOtelContext::ActiveRecordContext.current
+    assert_equal 'Widget', ctx[:model_name]
+    assert_equal 'active', ctx[:scope_name]
+  ensure
+    Thread.current[:_rails_otel_ctx_scope] = nil
+    RailsOtelContext::ActiveRecordContext.clear!
+  end
 end

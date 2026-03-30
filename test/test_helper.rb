@@ -39,6 +39,20 @@ class FakeSpan
   end
 end
 
+# Minimal stub so FakeRelation passes is_a?(::ActiveRecord::Relation) in tests
+unless defined?(ActiveRecord::Relation)
+  module ActiveRecord
+    Relation = Class.new
+  end
+end
+
+# Stands in for ActiveRecord::Relation in ClassMethodScopeTracking tests
+class FakeRelation < ActiveRecord::Relation
+  def otel_scope_name
+    instance_variable_get(:@_otel_scope_name)
+  end
+end
+
 module CallerLocationHelpers
   def location(path, label, lineno = nil)
     OpenStruct.new(absolute_path: path, path: path, label: label, lineno: lineno)
