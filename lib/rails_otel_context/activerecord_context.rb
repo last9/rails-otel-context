@@ -31,6 +31,14 @@ module RailsOtelContext
         scope = Thread.current[SCOPE_THREAD_KEY]
         ctx[:scope_name] = scope if scope
         Thread.current[THREAD_KEY] = ctx
+
+        # Enrich the current span directly. When OTel instruments via driver-level
+        # prepend (Trilogy, PG, Mysql2), the span is created BEFORE this notification
+        # fires, so CallContextProcessor#on_start sees nil AR context. Applying here
+        # fixes those spans after the fact.
+        return unless defined?(OpenTelemetry::Trace)
+
+        ActiveRecordContext.apply_to_span(OpenTelemetry::Trace.current_span, ctx)
       end
 
       def finish(_name, _id, _payload)
@@ -98,6 +106,38 @@ module RailsOtelContext
 
     def stub_scope(scope_name)
       Thread.current[SCOPE_THREAD_KEY] = scope_name
+    end
+
+    # Applies AR context directly to a span. Used by Subscriber#start to enrich spans
+    # created by driver-level OTel instrumentation (Trilogy, PG) before our notification
+    # subscriber runs. Also reads code.namespace/code.function already set by
+    # CallContextProcessor#on_start so the span_name_formatter has full context.
+    def apply_to_span(span, ctx)
+      return unless span.context.valid?
+
+      span.set_attribute('code.activerecord.model', ctx[:model_name]) if ctx[:model_name]
+      span.set_attribute('code.activerecord.method', ctx[:method_name]) if ctx[:method_name]
+      span.set_attribute('code.activerecord.scope', ctx[:scope_name]) if ctx[:scope_name]
+
+      formatter = RailsOtelContext.configuration.span_name_formatter
+      return unless formatter
+
+      # Dup deferred to here: set_attribute calls above need only the original ctx keys.
+      # The formatter may inspect code.namespace/code.function already on the span.
+      ar_ctx = ctx.dup
+      if span.respond_to?(:attributes)
+        ar_ctx[:code_namespace] = span.attributes['code.namespace']
+        ar_ctx[:code_function]  = span.attributes['code.function']
+      end
+
+      original_name = span.name
+      new_name = formatter.call(original_name, ar_ctx)
+      return unless new_name && new_name != original_name && span.respond_to?(:name=)
+
+      span.set_attribute('l9.orig.name', original_name)
+      span.name = new_name
+    rescue StandardError
+      nil
     end
 
     # Parses "Transaction Load" → { model_name: "Transaction", method_name: "Load" }
