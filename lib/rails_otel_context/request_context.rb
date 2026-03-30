@@ -12,13 +12,15 @@ module RailsOtelContext
   #
   # Thread safety: each Puma thread has its own slot — no sharing, no contention.
   module RequestContext
-    CONTROLLER_KEY = :_rails_otel_ctx_controller
-    ACTION_KEY     = :_rails_otel_ctx_action
+    CONTROLLER_KEY  = :_rails_otel_ctx_controller
+    ACTION_KEY      = :_rails_otel_ctx_action
+    QUERY_COUNT_KEY = :_rails_otel_ctx_qcount
 
     class << self
       def set(controller:, action:)
-        Thread.current[CONTROLLER_KEY] = controller
-        Thread.current[ACTION_KEY]     = action
+        Thread.current[CONTROLLER_KEY]  = controller
+        Thread.current[ACTION_KEY]      = action
+        Thread.current[QUERY_COUNT_KEY] = nil
       end
 
       # Returns [controller, action] in a single Thread.current access.
@@ -36,8 +38,9 @@ module RailsOtelContext
       end
 
       def clear!
-        Thread.current[CONTROLLER_KEY] = nil
-        Thread.current[ACTION_KEY]     = nil
+        Thread.current[CONTROLLER_KEY]  = nil
+        Thread.current[ACTION_KEY]      = nil
+        Thread.current[QUERY_COUNT_KEY] = nil
       end
     end
   end

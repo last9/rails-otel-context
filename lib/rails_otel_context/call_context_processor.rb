@@ -23,6 +23,7 @@ module RailsOtelContext
     AR_MODEL_ATTR        = 'code.activerecord.model'
     AR_METHOD_ATTR       = 'code.activerecord.method'
     AR_SCOPE_ATTR        = 'code.activerecord.scope'
+    AR_QUERY_COUNT_ATTR  = 'db.query_count'
     ORIG_NAME_ATTR       = 'l9.orig.name'
 
     def initialize(app_root:, config: RailsOtelContext.configuration)
@@ -93,6 +94,7 @@ module RailsOtelContext
       span.set_attribute(AR_MODEL_ATTR, ar_context[:model_name]) if ar_context[:model_name]
       span.set_attribute(AR_METHOD_ATTR, ar_context[:method_name]) if ar_context[:method_name]
       span.set_attribute(AR_SCOPE_ATTR, ar_context[:scope_name]) if ar_context[:scope_name]
+      span.set_attribute(AR_QUERY_COUNT_ATTR, ar_context[:query_count]) if ar_context[:query_count]
     end
 
     def apply_span_name_formatter(span, ar_context)

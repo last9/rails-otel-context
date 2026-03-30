@@ -5,7 +5,8 @@ module RailsOtelContext
     attr_accessor :redis_source_enabled,
                   :clickhouse_enabled,
                   :span_name_formatter,
-                  :request_context_enabled
+                  :request_context_enabled,
+                  :slow_query_threshold_ms
 
     attr_reader :custom_span_attributes
 
@@ -15,6 +16,7 @@ module RailsOtelContext
       @span_name_formatter = nil
       @custom_span_attributes = nil
       @request_context_enabled = false
+      @slow_query_threshold_ms = nil
     end
 
     # Accepts a callable (lambda/proc) that returns a Hash of string keys to string values.

@@ -51,4 +51,23 @@ class ConfigurationTest < Minitest::Test
       RailsOtelContext.configure { |c| c.custom_span_attributes = { 'team' => 'x' } }
     end
   end
+
+  def test_default_slow_query_threshold_ms_is_nil
+    assert_nil RailsOtelContext.configuration.slow_query_threshold_ms
+  end
+
+  def test_slow_query_threshold_ms_can_be_set
+    RailsOtelContext.configure { |c| c.slow_query_threshold_ms = 500 }
+    assert_equal 500, RailsOtelContext.configuration.slow_query_threshold_ms
+  end
+
+  def test_default_span_name_formatter_is_nil
+    assert_nil RailsOtelContext.configuration.span_name_formatter
+  end
+
+  def test_span_name_formatter_can_be_set
+    fn = ->(_orig, _ar) { 'renamed' }
+    RailsOtelContext.configure { |c| c.span_name_formatter = fn }
+    assert_equal fn, RailsOtelContext.configuration.span_name_formatter
+  end
 end

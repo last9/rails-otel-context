@@ -11,6 +11,7 @@ class ActiveRecordContextTest < Minitest::Test
 
   def teardown
     RailsOtelContext::ActiveRecordContext.clear!
+    Thread.current[RailsOtelContext::RequestContext::QUERY_COUNT_KEY] = nil
   end
 
   # parse_ar_name
@@ -49,6 +50,16 @@ class ActiveRecordContextTest < Minitest::Test
     assert_nil RailsOtelContext::ActiveRecordContext.parse_ar_name('ActiveRecord Internals')
   end
 
+  def test_returns_nil_for_single_word
+    assert_nil RailsOtelContext::ActiveRecordContext.parse_ar_name('SCHEMA')
+  end
+
+  def test_parse_preserves_method_name_with_spaces
+    r = RailsOtelContext::ActiveRecordContext.parse_ar_name('User Exists? (or not)')
+    assert_equal 'User', r[:model_name]
+    assert_equal 'Exists? (or not)', r[:method_name]
+  end
+
   # Subscriber lifecycle
 
   def test_subscriber_sets_and_clears_context
@@ -70,6 +81,44 @@ class ActiveRecordContextTest < Minitest::Test
     sub = RailsOtelContext::ActiveRecordContext::Subscriber.new
     sub.start('sql.active_record', '1', { name: 'CACHE User Load' })
     assert_nil RailsOtelContext::ActiveRecordContext.current
+  end
+
+  def test_subscriber_skips_sql
+    sub = RailsOtelContext::ActiveRecordContext::Subscriber.new
+    sub.start('sql.active_record', '1', { name: 'SQL' })
+    assert_nil RailsOtelContext::ActiveRecordContext.current
+  end
+
+  def test_subscriber_skips_nil_payload_name
+    sub = RailsOtelContext::ActiveRecordContext::Subscriber.new
+    sub.start('sql.active_record', '1', { name: nil })
+    assert_nil RailsOtelContext::ActiveRecordContext.current
+  end
+
+  def test_subscriber_finish_clears_thread_key_even_without_timing
+    sub = RailsOtelContext::ActiveRecordContext::Subscriber.new
+    sub.start('sql.active_record', '1', { name: 'User Load' })
+    assert_equal 'User', RailsOtelContext::ActiveRecordContext.current[:model_name]
+
+    # finish with a different id — timing entry mismatch, but THREAD_KEY must still clear
+    sub.finish('sql.active_record', 'other-id', {})
+    assert_nil RailsOtelContext::ActiveRecordContext.current
+  end
+
+  def test_subscriber_finish_no_db_slow_on_timing_id_mismatch
+    with_slow_query_threshold(50) do
+      with_current_span(FakeSpan.new(valid_context: true)) do |span|
+        sub = RailsOtelContext::ActiveRecordContext::Subscriber.new
+        call_count = 0
+        with_stubbed_clock(-> { (call_count += 1) == 1 ? 0.0 : 1.0 }) do
+          sub.start('sql.active_record', 'event-A', { name: 'User Load' })
+          # finish with wrong id — timing stored for 'event-A' but we send 'event-B'
+          sub.finish('sql.active_record', 'event-B', {})
+        end
+        refute span.attributes.key?('db.slow'),
+               'mismatched id should not set db.slow'
+      end
+    end
   end
 
   # Scope tracking via thread-local
@@ -220,6 +269,171 @@ class ActiveRecordContextTest < Minitest::Test
     RailsOtelContext.reset_configuration!
   end
 
+  def test_apply_to_span_sets_query_count
+    span = FakeSpan.new(valid_context: true)
+    ctx = { model_name: 'User', method_name: 'Load', query_count: 5 }
+    RailsOtelContext::ActiveRecordContext.apply_to_span(span, ctx)
+
+    assert_equal 5, span.attributes['db.query_count']
+  end
+
+  def test_apply_to_span_no_query_count_when_absent
+    span = FakeSpan.new(valid_context: true)
+    ctx = { model_name: 'User', method_name: 'Load' }
+    RailsOtelContext::ActiveRecordContext.apply_to_span(span, ctx)
+
+    refute span.attributes.key?('db.query_count')
+  end
+
+  def test_apply_to_span_formatter_returning_nil_skips_rename
+    formatter = ->(_orig, _ar) {}
+    RailsOtelContext.configure { |c| c.span_name_formatter = formatter }
+
+    span = FakeSpan.new(valid_context: true)
+    span.name = 'trilogy.query'
+    ctx = { model_name: 'User', method_name: 'Load' }
+    RailsOtelContext::ActiveRecordContext.apply_to_span(span, ctx)
+
+    assert_equal 'trilogy.query', span.name
+    refute span.attributes.key?('l9.orig.name')
+  ensure
+    RailsOtelContext.reset_configuration!
+  end
+
+  def test_apply_to_span_formatter_returning_same_name_skips_orig
+    RailsOtelContext.configure { |c| c.span_name_formatter = ->(_orig, _ar) { 'trilogy.query' } }
+
+    span = FakeSpan.new(valid_context: true)
+    span.name = 'trilogy.query'
+    ctx = { model_name: 'User', method_name: 'Load' }
+    RailsOtelContext::ActiveRecordContext.apply_to_span(span, ctx)
+
+    refute span.attributes.key?('l9.orig.name'),
+           'l9.orig.name should not be set when formatter returns the same name'
+  ensure
+    RailsOtelContext.reset_configuration!
+  end
+
+  def test_apply_to_span_formatter_exception_rescued_attributes_still_set
+    RailsOtelContext.configure { |c| c.span_name_formatter = ->(_orig, _ar) { raise 'boom' } }
+
+    span = FakeSpan.new(valid_context: true)
+    ctx = { model_name: 'User', method_name: 'Load' }
+    RailsOtelContext::ActiveRecordContext.apply_to_span(span, ctx)
+
+    assert_equal 'User', span.attributes['code.activerecord.model']
+  ensure
+    RailsOtelContext.reset_configuration!
+  end
+
+  # ScopeNameTracking — wraps the `scope` macro to tag returned relations
+  #
+  # In production, AR's `scope` lives in an included ClassMethods module so it's
+  # reachable via `super` from ScopeNameTracking. Replicating that here: the base
+  # `scope` must be in an *extended module* (not a direct singleton method) so that
+  # ScopeNameTracking — extended after — takes precedence in the lookup chain.
+
+  def build_scope_tracking_class
+    base = Module.new do
+      def scope(name, body)
+        define_singleton_method(name, &body)
+      end
+    end
+    Class.new do
+      extend base
+      extend RailsOtelContext::ActiveRecordContext::ScopeNameTracking
+    end
+  end
+  private :build_scope_tracking_class
+
+  def test_scope_name_tracking_tags_relation_with_scope_name
+    model_class = build_scope_tracking_class
+    model_class.scope(:active, -> { FakeRelation.new })
+    result = model_class.active
+    assert_equal 'active', result.instance_variable_get(:@_otel_scope_name)
+  end
+
+  def test_scope_name_tracking_no_tag_when_body_returns_non_relation
+    model_class = build_scope_tracking_class
+    model_class.scope(:count_all, -> { 42 })
+    result = model_class.count_all
+    assert_equal 42, result
+  end
+
+  def test_scope_name_tracking_no_double_wrap
+    model_class = build_scope_tracking_class
+    relation = FakeRelation.new
+    model_class.scope(:active, -> { relation })
+    model_class.scope(:active, -> { relation }) # second call — guard prevents double-wrap
+
+    # Should not raise; calling active must still return the relation
+    result = model_class.active
+    assert_kind_of ActiveRecord::Relation, result
+  end
+
+  # RelationScopeCapture — pushes scope name to thread-local during exec_queries
+
+  def test_relation_scope_capture_sets_scope_thread_key_during_exec_queries
+    captured_scope = nil
+
+    klass = Class.new(ActiveRecord::Relation) do
+      prepend RailsOtelContext::ActiveRecordContext::RelationScopeCapture
+
+      define_method(:exec_queries) do
+        captured_scope = Thread.current[:_rails_otel_ctx_scope]
+      end
+    end
+
+    instance = klass.new
+    instance.instance_variable_set(:@_otel_scope_name, 'recent_completed')
+    instance.exec_queries
+
+    assert_equal 'recent_completed', captured_scope
+  end
+
+  def test_relation_scope_capture_clears_scope_thread_key_after_exec_queries
+    klass = Class.new(ActiveRecord::Relation) do
+      prepend RailsOtelContext::ActiveRecordContext::RelationScopeCapture
+
+      define_method(:exec_queries) { nil }
+    end
+
+    instance = klass.new
+    instance.instance_variable_set(:@_otel_scope_name, 'active')
+    instance.exec_queries
+
+    assert_nil Thread.current[:_rails_otel_ctx_scope]
+  end
+
+  def test_relation_scope_capture_clears_scope_thread_key_on_exception
+    klass = Class.new(ActiveRecord::Relation) do
+      prepend RailsOtelContext::ActiveRecordContext::RelationScopeCapture
+
+      define_method(:exec_queries) { raise 'db error' }
+    end
+
+    instance = klass.new
+    instance.instance_variable_set(:@_otel_scope_name, 'active')
+    assert_raises(RuntimeError) { instance.exec_queries }
+
+    assert_nil Thread.current[:_rails_otel_ctx_scope],
+               'scope thread-local must be cleared even when exec_queries raises'
+  end
+
+  def test_relation_scope_capture_skips_when_no_scope_name
+    klass = Class.new(ActiveRecord::Relation) do
+      prepend RailsOtelContext::ActiveRecordContext::RelationScopeCapture
+
+      define_method(:exec_queries) { nil }
+    end
+
+    instance = klass.new
+    # No @_otel_scope_name set
+    instance.exec_queries
+
+    assert_nil Thread.current[:_rails_otel_ctx_scope]
+  end
+
   # ClassMethodScopeTracking
 
   def test_class_method_returning_relation_sets_scope_name
@@ -254,6 +468,22 @@ class ActiveRecordContextTest < Minitest::Test
     assert_equal 42, result
   end
 
+  def test_class_method_outside_app_root_not_tracked
+    # Source file not under app_root → method not wrapped, no scope name set
+    RailsOtelContext::ActiveRecordContext.install!(app_root: '/some/other/root')
+
+    model_class = Class.new do
+      extend RailsOtelContext::ActiveRecordContext::ClassMethodScopeTracking
+
+      def self.active
+        FakeRelation.new
+      end
+    end
+
+    result = model_class.active
+    assert_nil result.instance_variable_get(:@_otel_scope_name)
+  end
+
   def test_class_method_scope_end_to_end_via_subscriber
     app_root = File.expand_path('..', __dir__)
     RailsOtelContext::ActiveRecordContext.install!(app_root: app_root)
@@ -279,6 +509,150 @@ class ActiveRecordContextTest < Minitest::Test
     assert_equal 'active', ctx[:scope_name]
   ensure
     Thread.current[:_rails_otel_ctx_scope] = nil
+    RailsOtelContext::ActiveRecordContext.clear!
+  end
+
+  # N+1 detection
+
+  def test_query_count_increments_for_repeated_queries
+    sub = RailsOtelContext::ActiveRecordContext::Subscriber.new
+    sub.start('sql.active_record', '1', { name: 'User Load' })
+    assert_nil RailsOtelContext::ActiveRecordContext.current[:query_count],
+               'first query should not set query_count'
+    RailsOtelContext::ActiveRecordContext.clear!
+
+    sub.start('sql.active_record', '2', { name: 'User Load' })
+    assert_equal 2, RailsOtelContext::ActiveRecordContext.current[:query_count]
+  end
+
+  def test_query_count_independent_per_model_method
+    sub = RailsOtelContext::ActiveRecordContext::Subscriber.new
+    sub.start('sql.active_record', '1', { name: 'User Load' })
+    sub.start('sql.active_record', '2', { name: 'Order Load' })
+
+    # Order Load is a different key — should still be first occurrence
+    ctx = RailsOtelContext::ActiveRecordContext.current
+    assert_nil ctx[:query_count],
+               'different model/method pair should not trigger N+1 flag'
+  end
+
+  def test_query_count_reset_on_request_context_set
+    Thread.current[RailsOtelContext::RequestContext::QUERY_COUNT_KEY] = { 'User.Load' => 5 }
+    RailsOtelContext::RequestContext.set(controller: 'UsersController', action: 'index')
+    assert_nil Thread.current[RailsOtelContext::RequestContext::QUERY_COUNT_KEY]
+  ensure
+    RailsOtelContext::RequestContext.clear!
+  end
+
+  def test_query_count_set_on_span_when_repeated
+    with_current_span(FakeSpan.new(valid_context: true)) do |span|
+      sub = RailsOtelContext::ActiveRecordContext::Subscriber.new
+      sub.start('sql.active_record', '1', { name: 'User Load' })
+      RailsOtelContext::ActiveRecordContext.clear!
+      sub.start('sql.active_record', '2', { name: 'User Load' })
+
+      assert_equal 2, span.attributes['db.query_count']
+    end
+  end
+
+  def test_query_count_not_set_on_span_for_first_occurrence
+    with_current_span(FakeSpan.new(valid_context: true)) do |span|
+      sub = RailsOtelContext::ActiveRecordContext::Subscriber.new
+      sub.start('sql.active_record', '1', { name: 'User Load' })
+
+      refute span.attributes.key?('db.query_count'),
+             'first occurrence should not carry db.query_count'
+    end
+  end
+
+  def test_query_count_reaches_nth_on_nth_occurrence
+    sub = RailsOtelContext::ActiveRecordContext::Subscriber.new
+
+    sub.start('sql.active_record', '1', { name: 'Order Load' })
+    RailsOtelContext::ActiveRecordContext.clear!
+    sub.start('sql.active_record', '2', { name: 'Order Load' })
+    RailsOtelContext::ActiveRecordContext.clear!
+    sub.start('sql.active_record', '3', { name: 'Order Load' })
+
+    assert_equal 3, RailsOtelContext::ActiveRecordContext.current[:query_count]
+  end
+
+  # Slow query detection
+
+  def test_slow_query_sets_db_slow_on_span
+    with_slow_query_threshold(100) do
+      with_current_span(FakeSpan.new(valid_context: true)) do |span|
+        sub = RailsOtelContext::ActiveRecordContext::Subscriber.new
+        call_count = 0
+        with_stubbed_clock(-> { (call_count += 1) == 1 ? 0.0 : 0.2 }) do
+          sub.start('sql.active_record', 'event-1', { name: 'User Load' })
+          sub.finish('sql.active_record', 'event-1', {})
+        end
+        assert span.attributes['db.slow']
+      end
+    end
+  end
+
+  def test_slow_query_does_not_set_db_slow_when_fast
+    with_slow_query_threshold(100) do
+      with_current_span(FakeSpan.new(valid_context: true)) do |span|
+        sub = RailsOtelContext::ActiveRecordContext::Subscriber.new
+        call_count = 0
+        with_stubbed_clock(-> { (call_count += 1) == 1 ? 0.0 : 0.05 }) do # 50ms — under threshold
+          sub.start('sql.active_record', 'event-2', { name: 'User Load' })
+          sub.finish('sql.active_record', 'event-2', {})
+        end
+        refute span.attributes.key?('db.slow')
+      end
+    end
+  end
+
+  def test_slow_query_skipped_when_threshold_not_configured
+    with_current_span(FakeSpan.new(valid_context: true)) do |span|
+      sub = RailsOtelContext::ActiveRecordContext::Subscriber.new
+      sub.start('sql.active_record', 'event-3', { name: 'User Load' })
+      sub.finish('sql.active_record', 'event-3', {})
+
+      refute span.attributes.key?('db.slow')
+    end
+  end
+
+  def test_slow_query_at_exact_threshold_sets_db_slow
+    # elapsed_ms >= threshold, not >
+    with_slow_query_threshold(100) do
+      with_current_span(FakeSpan.new(valid_context: true)) do |span|
+        sub = RailsOtelContext::ActiveRecordContext::Subscriber.new
+        call_count = 0
+        with_stubbed_clock(-> { (call_count += 1) == 1 ? 0.0 : 0.1 }) do # exactly 100ms
+          sub.start('sql.active_record', 'event-4', { name: 'User Load' })
+          sub.finish('sql.active_record', 'event-4', {})
+        end
+        assert span.attributes['db.slow'], 'query at exact threshold should be flagged'
+      end
+    end
+  end
+
+  def test_slow_query_no_db_slow_when_span_context_invalid
+    with_slow_query_threshold(100) do
+      with_current_span(FakeSpan.new(valid_context: false)) do |span|
+        sub = RailsOtelContext::ActiveRecordContext::Subscriber.new
+        call_count = 0
+        with_stubbed_clock(-> { (call_count += 1) == 1 ? 0.0 : 0.5 }) do
+          sub.start('sql.active_record', 'event-5', { name: 'User Load' })
+          sub.finish('sql.active_record', 'event-5', {})
+        end
+        refute span.attributes.key?('db.slow')
+      end
+    end
+  end
+
+  private
+
+  def with_slow_query_threshold(threshold_ms)
+    RailsOtelContext.configure { |c| c.slow_query_threshold_ms = threshold_ms }
+    yield
+  ensure
+    RailsOtelContext.reset_configuration!
     RailsOtelContext::ActiveRecordContext.clear!
   end
 end

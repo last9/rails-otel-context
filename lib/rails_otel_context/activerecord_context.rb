@@ -13,9 +13,11 @@ module RailsOtelContext
   #    Transaction.recent_completed.to_a where the scope method returns before
   #    SQL fires.
   module ActiveRecordContext
-    THREAD_KEY       = :_rails_otel_ctx_ar
-    SCOPE_THREAD_KEY = :_rails_otel_ctx_scope
-    private_constant :THREAD_KEY, :SCOPE_THREAD_KEY
+    THREAD_KEY        = :_rails_otel_ctx_ar
+    SCOPE_THREAD_KEY  = :_rails_otel_ctx_scope
+    TIMING_THREAD_KEY = :_rails_otel_ctx_timing
+    DB_SLOW_ATTR      = 'db.slow'
+    private_constant :THREAD_KEY, :SCOPE_THREAD_KEY, :TIMING_THREAD_KEY
 
     # Tracks class methods (def self.name) that return an AR::Relation so their
     # name is captured as code.activerecord.scope, complementing ScopeNameTracking
@@ -59,7 +61,11 @@ module RailsOtelContext
 
     # Subscriber for sql.active_record notifications.
     class Subscriber
-      def start(_name, _id, payload)
+      def initialize
+        @threshold = RailsOtelContext.configuration.slow_query_threshold_ms
+      end
+
+      def start(_name, id, payload)
         ar_name = payload[:name]
         return unless ar_name
         return if ar_name == 'SCHEMA' || ar_name.start_with?('CACHE') || ar_name == 'SQL'
@@ -70,7 +76,15 @@ module RailsOtelContext
         # Include scope name if one was captured by RelationScopeCapture
         scope = Thread.current[SCOPE_THREAD_KEY]
         ctx[:scope_name] = scope if scope
+
+        query_key = "#{ctx[:model_name]}.#{ctx[:method_name]}"
+        counts = (Thread.current[RequestContext::QUERY_COUNT_KEY] ||= {})
+        count = (counts[query_key] = (counts[query_key] || 0) + 1)
+        ctx[:query_count] = count if count > 1
+
         Thread.current[THREAD_KEY] = ctx
+
+        Thread.current[TIMING_THREAD_KEY] = [id, Process.clock_gettime(Process::CLOCK_MONOTONIC)] if @threshold
 
         # Enrich the current span directly. When OTel instruments via driver-level
         # prepend (Trilogy, PG, Mysql2), the span is created BEFORE this notification
@@ -81,7 +95,19 @@ module RailsOtelContext
         ActiveRecordContext.apply_to_span(OpenTelemetry::Trace.current_span, ctx)
       end
 
-      def finish(_name, _id, _payload)
+      def finish(_name, id, _payload)
+        if @threshold
+          entry = Thread.current[TIMING_THREAD_KEY]
+          if entry&.first.equal?(id)
+            Thread.current[TIMING_THREAD_KEY] = nil
+            elapsed_ms = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - entry[1]) * 1000
+            if elapsed_ms >= @threshold
+              span = OpenTelemetry::Trace.current_span
+              span.set_attribute(DB_SLOW_ATTR, true) if span.context.valid?
+            end
+          end
+        end
+      ensure
         Thread.current[THREAD_KEY] = nil
       end
     end
@@ -144,6 +170,7 @@ module RailsOtelContext
     def clear!
       Thread.current[THREAD_KEY] = nil
       Thread.current[SCOPE_THREAD_KEY] = nil
+      Thread.current[TIMING_THREAD_KEY] = nil
     end
 
     # Test helpers: set AR context directly for unit tests.
@@ -165,6 +192,7 @@ module RailsOtelContext
       span.set_attribute('code.activerecord.model', ctx[:model_name]) if ctx[:model_name]
       span.set_attribute('code.activerecord.method', ctx[:method_name]) if ctx[:method_name]
       span.set_attribute('code.activerecord.scope', ctx[:scope_name]) if ctx[:scope_name]
+      span.set_attribute('db.query_count', ctx[:query_count]) if ctx[:query_count]
 
       formatter = RailsOtelContext.configuration.span_name_formatter
       return unless formatter

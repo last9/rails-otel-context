@@ -133,4 +133,29 @@ class RequestContextTest < Minitest::Test
   def test_default_request_context_is_disabled
     assert_equal false, RailsOtelContext.configuration.request_context_enabled
   end
+
+  # ---------------------------------------------------------------------------
+  # QUERY_COUNT_KEY lifecycle
+  # ---------------------------------------------------------------------------
+
+  def test_set_resets_query_count
+    Thread.current[RailsOtelContext::RequestContext::QUERY_COUNT_KEY] = { 'User.Load' => 3 }
+    RailsOtelContext::RequestContext.set(controller: 'UsersController', action: 'index')
+    assert_nil Thread.current[RailsOtelContext::RequestContext::QUERY_COUNT_KEY]
+  end
+
+  def test_clear_resets_query_count
+    Thread.current[RailsOtelContext::RequestContext::QUERY_COUNT_KEY] = { 'User.Load' => 3 }
+    RailsOtelContext::RequestContext.clear!
+    assert_nil Thread.current[RailsOtelContext::RequestContext::QUERY_COUNT_KEY]
+  end
+
+  def test_query_count_starts_fresh_across_requests
+    RailsOtelContext::RequestContext.set(controller: 'PostsController', action: 'index')
+    Thread.current[RailsOtelContext::RequestContext::QUERY_COUNT_KEY] = { 'Post.Load' => 5 }
+
+    # Simulates the next request arriving on the same thread
+    RailsOtelContext::RequestContext.set(controller: 'UsersController', action: 'show')
+    assert_nil Thread.current[RailsOtelContext::RequestContext::QUERY_COUNT_KEY]
+  end
 end
