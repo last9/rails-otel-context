@@ -10,11 +10,28 @@ ENV['RAILS_OTEL_CONTEXT_TEST'] = 'true'
 $LOAD_PATH.unshift(File.expand_path('../lib', __dir__))
 require 'rails_otel_context'
 
+class FakeSpanContext
+  def initialize(valid)
+    @valid = valid
+  end
+
+  def valid?
+    @valid
+  end
+end
+
 class FakeSpan
   attr_reader :attributes
+  attr_accessor :name
 
-  def initialize
+  def initialize(valid_context: true)
     @attributes = {}
+    @name = 'SELECT'
+    @context = FakeSpanContext.new(valid_context)
+  end
+
+  def context
+    @context
   end
 
   def set_attribute(key, value)
