@@ -104,4 +104,16 @@ module SpanHelpers
       remove_method :__rails_otel_context_original_current_span
     end
   end
+
+  # Temporarily replaces Process.clock_gettime with a stub callable.
+  # Restores the original after the block so Minitest's timing still works.
+  def with_stubbed_clock(stub)
+    ps = Process.singleton_class
+    ps.alias_method(:__otel_orig_clock_gettime, :clock_gettime)
+    ps.define_method(:clock_gettime) { |*_| stub.call }
+    yield
+  ensure
+    ps.alias_method(:clock_gettime, :__otel_orig_clock_gettime)
+    ps.remove_method(:__otel_orig_clock_gettime)
+  end
 end

@@ -395,6 +395,26 @@ class CallContextProcessorTest < Minitest::Test
     RailsOtelContext::ActiveRecordContext.clear!
   end
 
+  def test_db_context_sets_query_count_when_repeated
+    RailsOtelContext::ActiveRecordContext.stub_context(
+      model_name: 'User', method_name: 'Load', query_count: 3
+    )
+    span = FakeSpan.new
+    @processor.on_start(span, nil)
+    assert_equal 3, span.attributes['db.query_count']
+  ensure
+    RailsOtelContext::ActiveRecordContext.clear!
+  end
+
+  def test_db_context_no_query_count_on_first_occurrence
+    RailsOtelContext::ActiveRecordContext.stub_context({ model_name: 'User', method_name: 'Load' })
+    span = FakeSpan.new
+    @processor.on_start(span, nil)
+    refute span.attributes.key?('db.query_count')
+  ensure
+    RailsOtelContext::ActiveRecordContext.clear!
+  end
+
   # ---------------------------------------------------------------------------
   # no-op lifecycle methods
   # ---------------------------------------------------------------------------
