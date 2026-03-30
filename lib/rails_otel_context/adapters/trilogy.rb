@@ -35,10 +35,7 @@ module RailsOtelContext
           # AR context and span renaming handled by CallContextProcessor.apply_db_context.
           define_method(:query) do |sql|
             result = super(sql)
-
-            span = OpenTelemetry::Trace.current_span
-            mod.apply_source_to_span(span, mod.source_location_for_app) if span.context.valid?
-
+            mod.apply_call_site_to_span(OpenTelemetry::Trace.current_span, mod.call_site_for_app)
             result
           end
         end

@@ -15,6 +15,11 @@ class CallContextProcessorTest < Minitest::Test
     @processor = RailsOtelContext::CallContextProcessor.new(app_root: @app_root)
   end
 
+  def teardown
+    RailsOtelContext::FrameContext.clear!
+    RailsOtelContext.reset_configuration!
+  end
+
   # ---------------------------------------------------------------------------
   # Label-based class + method extraction
   # ---------------------------------------------------------------------------
@@ -200,6 +205,66 @@ class CallContextProcessorTest < Minitest::Test
     assert_equal 'create', span.attributes['code.function']
     assert_equal 5, span.attributes['code.lineno']
     assert_equal 'app/services/order_service.rb', span.attributes['code.filepath']
+  end
+
+  # ---------------------------------------------------------------------------
+  # pushed frame fast path
+  # ---------------------------------------------------------------------------
+
+  def test_pushed_frame_sets_namespace_and_function
+    span = FakeSpan.new
+    RailsOtelContext::FrameContext.with_frame(class_name: 'PaymentsController', method_name: 'create') do
+      @processor.on_start(span, nil)
+    end
+    assert_equal 'PaymentsController', span.attributes['code.namespace']
+    assert_equal 'create', span.attributes['code.function']
+  end
+
+  def test_pushed_frame_beats_stack_walk
+    span = FakeSpan.new
+    # stack walk would return OrderService from the caller location
+    RailsOtelContext::FrameContext.with_frame(class_name: 'PaymentsController', method_name: 'create') do
+      with_caller_location(path: "#{@app_root}/app/services/order_service.rb", label: 'OrderService#call') do
+        @processor.on_start(span, nil)
+      end
+    end
+    # pushed frame wins
+    assert_equal 'PaymentsController', span.attributes['code.namespace']
+    assert_equal 'create', span.attributes['code.function']
+  end
+
+  def test_pushed_frame_does_not_set_lineno_or_filepath
+    span = FakeSpan.new
+    RailsOtelContext::FrameContext.with_frame(class_name: 'OrdersController', method_name: 'index') do
+      @processor.on_start(span, nil)
+    end
+    refute span.attributes.key?('code.lineno')
+    refute span.attributes.key?('code.filepath')
+  end
+
+  def test_stack_walk_used_when_no_frame_pushed
+    span = FakeSpan.new
+    with_caller_location(path: "#{@app_root}/app/services/order_service.rb", label: 'OrderService#call') do
+      @processor.on_start(span, nil)
+    end
+    assert_equal 'OrderService', span.attributes['code.namespace']
+    assert_equal 'call', span.attributes['code.function']
+  end
+
+  def test_pushed_frame_cleared_after_with_frame_block
+    span_inside  = FakeSpan.new
+    span_outside = FakeSpan.new
+
+    RailsOtelContext::FrameContext.with_frame(class_name: 'Foo', method_name: 'bar') do
+      @processor.on_start(span_inside, nil)
+    end
+
+    with_caller_location(path: "#{@app_root}/app/services/order_service.rb", label: 'OrderService#call') do
+      @processor.on_start(span_outside, nil)
+    end
+
+    assert_equal 'Foo', span_inside.attributes['code.namespace']
+    assert_equal 'OrderService', span_outside.attributes['code.namespace']
   end
 
   # ---------------------------------------------------------------------------

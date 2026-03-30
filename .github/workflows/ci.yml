@@ -88,3 +88,26 @@ jobs:
         name: rails-otel-context-gem
         path: rails-otel-context-*.gem
         retention-days: 7
+
+  allocation_guard:
+    name: Allocation Budget
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Ruby 3.3
+      uses: ruby/setup-ruby@v1
+      with:
+        ruby-version: '3.3'
+        bundler-cache: false
+
+    - name: Install dependencies
+      run: |
+        gem install bundler
+        bundle install --jobs 4 --retry 3
+
+    - name: Check allocation budgets
+      run: ruby bench/allocation_guard.rb
+      env:
+        RAILS_OTEL_CONTEXT_TEST: 'true'

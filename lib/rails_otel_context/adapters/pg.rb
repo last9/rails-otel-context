@@ -45,10 +45,12 @@ module RailsOtelContext
           # AR context and span renaming handled by CallContextProcessor.apply_db_context.
           methods.each do |method_name|
             define_method(method_name) do |*args, &user_block|
-              source = mod.source_location_for_app
+              # Capture before super: PG yields into a block so the original
+              # call stack is only visible here, not inside the result block.
+              site = mod.call_site_for_app
 
               super(*args) do |result|
-                mod.apply_source_to_span(OpenTelemetry::Trace.current_span, source)
+                mod.apply_call_site_to_span(OpenTelemetry::Trace.current_span, site)
                 user_block ? user_block.call(result) : result
               end
             end

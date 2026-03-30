@@ -91,6 +91,7 @@ end
 | `request.action` | `"index"` | Rails action (requires `request_context_enabled`) |
 | `db.query_count` | `47` | How many times this model+operation was queried in this request — appears only on the 2nd+ occurrence, which flags N+1 patterns |
 | `db.slow` | `true` | Set when query duration exceeds `slow_query_threshold_ms` |
+| `db.async` | `true` | Set when query was issued via `load_async` (Rails 7.1+) |
 
 ## Span naming
 
@@ -102,8 +103,26 @@ Without a formatter, DB spans arrive named by the driver (`SELECT`, `INSERT`). T
 | `Transaction.total_revenue` | `code_function: "total_revenue"` | `Transaction.total_revenue` |
 | `Transaction.where(...).first` | `method_name: "Load"` | `Transaction.Load` |
 | `record.update(...)` | `method_name: "Update"` | `Transaction.Update` |
+| Counter cache, `connection.execute` | SQL parsed → table mapped to model | `User.Update` |
 
 The original span name is preserved in `l9.orig.name` so you can always filter on the raw driver operation.
+
+### Counter caches and raw SQL
+
+Rails counter caches, `touch_later`, and `connection.execute` calls fire `sql.active_record` with `payload[:name] = "SQL"` rather than `"User Update"`. The gem parses the SQL statement directly and maps the table name back to the AR model:
+
+```
+UPDATE `users` SET `users`.`comments_count` = COALESCE(...)
+  → code.activerecord.model: "User"
+  → code.activerecord.method: "Update"
+  → span renamed to "User.Update" (with formatter)
+```
+
+The table→model map is built from `AR::Base.descendants` on first use. In production with `eager_load!` this is always correct. In development, call this after a code reload if you see stale model names:
+
+```ruby
+RailsOtelContext::ActiveRecordContext.reset_ar_table_model_map!
+```
 
 ### Scope tracking
 
@@ -130,6 +149,48 @@ c.redis_source_enabled = true
 ## ClickHouse
 
 No official OTel instrumentation exists for ClickHouse. This gem creates client spans automatically for `ClickHouse::Client`, `ClickHouse::Connection`, and `Clickhouse::Client`.
+
+## Benchmarks
+
+The subscriber runs in the hot path of every SQL query. Two scripts live in `bench/`:
+
+### Allocation guard (also runs in CI)
+
+Verifies the per-call allocation budget hasn't regressed. Deterministic — same count every run regardless of machine:
+
+```
+ruby bench/allocation_guard.rb
+```
+
+```
+PASS  named query (User Load): 4.0 allocs/call (budget: 4)
+PASS  SQL-named counter cache UPDATE: 6.0 allocs/call (budget: 6)
+
+All allocation budgets met.
+```
+
+Exits 1 if any path exceeds its budget. Update the budget constant in `bench/allocation_guard.rb` whenever a deliberate trade-off is made.
+
+### Full profiling suite
+
+Throughput, per-call allocations with top allocating lines, and a StackProf CPU flamegraph:
+
+```
+bundle exec ruby bench/subscriber_hot_path.rb
+```
+
+The flamegraph dump lands at `tmp/subscriber.dump`. View it with:
+
+```
+stackprof --flamegraph tmp/subscriber.dump | open -f -a 'Google Chrome'
+```
+
+**Baseline (Ruby 3.3, Apple M-series):**
+
+| Path | Allocs/call | Throughput |
+|---|---|---|
+| Named AR query (`User Load`) | 4 objects | ~900k i/s |
+| SQL counter cache (`name=SQL`) | 6 objects | ~650k i/s |
 
 ## Requirements
 
