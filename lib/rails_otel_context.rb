@@ -12,6 +12,7 @@ require 'rails_otel_context/source_location'
 require 'rails_otel_context/activerecord_context'
 require 'rails_otel_context/adapters'
 require 'rails_otel_context/request_context'
+require 'rails_otel_context/frame_context'
 require 'rails_otel_context/call_context_processor'
 require 'rails_otel_context/railtie' if defined?(Rails::Railtie)
 
@@ -27,6 +28,19 @@ module RailsOtelContext
 
     def reset_configuration!
       @configuration = Configuration.new
+    end
+
+    # Convenience delegates to FrameContext — see FrameContext for full docs.
+    def with_frame(class_name:, method_name:, &block)
+      FrameContext.with_frame(class_name: class_name, method_name: method_name, &block)
+    end
+
+    def push_frame(class_name:, method_name:)
+      FrameContext.push(class_name: class_name, method_name: method_name)
+    end
+
+    def pop_frame
+      FrameContext.pop
     end
   end
 end

@@ -1,0 +1,7 @@
+{"run":0,"experiment":"baseline","named":5.0,"sql":7.0,"total":12.0,"tests":69,"status":"baseline","commit":null}
+{"run":1,"experiment":"STI fix base_class==m","named":5.0,"sql":7.0,"total":12.0,"tests":70,"status":"kept","note":"correctness fix, no alloc change"}
+{"run":2,"experiment":"parse_ar_name split→index+slice","named":4.0,"sql":7.0,"total":11.0,"tests":70,"status":"kept","note":"-1 alloc named path"}
+{"run":3,"experiment":"load_async db.async attribute","named":4.0,"sql":7.0,"total":11.0,"tests":72,"status":"kept","note":"observability gap closed"}
+{"run":4,"experiment":"verb regex→index+casecmp","named":4.0,"sql":7.0,"total":11.0,"tests":72,"status":"reverted","note":"no alloc savings measured"}
+{"run":5,"experiment":"AR method coverage + find_each test","named":4.0,"sql":7.0,"total":11.0,"tests":73,"status":"kept","note":"Pluck/Ids/Destroy All/find_each gap verification"}
+{"run":6,"experiment":"table regex→extract_table_after","named":4.0,"sql":6.0,"total":10.0,"tests":73,"status":"kept","note":"-1 alloc SQL path; index+getbyte vs regex MatchData+String"}

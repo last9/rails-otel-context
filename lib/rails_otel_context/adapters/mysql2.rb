@@ -36,10 +36,7 @@ module RailsOtelContext
           %i[query prepare].each do |method_name|
             define_method(method_name) do |*args|
               result = super(*args)
-
-              span = OpenTelemetry::Trace.current_span
-              mod.apply_source_to_span(span, mod.source_location_for_app) if span.context.valid?
-
+              mod.apply_call_site_to_span(OpenTelemetry::Trace.current_span, mod.call_site_for_app)
               result
             end
           end

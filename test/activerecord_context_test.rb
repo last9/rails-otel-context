@@ -60,6 +60,40 @@ class ActiveRecordContextTest < Minitest::Test
     assert_equal 'Exists? (or not)', r[:method_name]
   end
 
+  def test_parses_pluck
+    r = RailsOtelContext::ActiveRecordContext.parse_ar_name('User Pluck')
+    assert_equal 'User', r[:model_name]
+    assert_equal 'Pluck', r[:method_name]
+  end
+
+  def test_parses_ids
+    r = RailsOtelContext::ActiveRecordContext.parse_ar_name('User Ids')
+    assert_equal 'User', r[:model_name]
+    assert_equal 'Ids', r[:method_name]
+  end
+
+  # Rails fires "User Destroy All" for destroy_all — multi-word method name preserved
+  def test_parses_destroy_all
+    r = RailsOtelContext::ActiveRecordContext.parse_ar_name('User Destroy All')
+    assert_equal 'User', r[:model_name]
+    assert_equal 'Destroy All', r[:method_name]
+  end
+
+  # find_each / find_in_batches: scope ivar lives on the Relation, exec_queries
+  # wraps each batch call so scope_name is captured per batch — no gap here.
+  def test_scope_thread_key_is_set_during_exec_queries_and_cleared_after
+    captured_scope = nil
+    relation_class = Class.new do
+      prepend RailsOtelContext::ActiveRecordContext::RelationScopeCapture
+      define_method(:exec_queries) { captured_scope = Thread.current[:_rails_otel_ctx_scope] }
+    end
+    relation = relation_class.new
+    relation.instance_variable_set(:@_otel_scope_name, 'recent')
+    relation.exec_queries
+    assert_equal 'recent', captured_scope
+    assert_nil Thread.current[:_rails_otel_ctx_scope]
+  end
+
   # Subscriber lifecycle
 
   def test_subscriber_sets_and_clears_context
@@ -83,7 +117,8 @@ class ActiveRecordContextTest < Minitest::Test
     assert_nil RailsOtelContext::ActiveRecordContext.current
   end
 
-  def test_subscriber_skips_sql
+  def test_subscriber_skips_sql_when_no_model_found
+    # name="SQL" with no sql payload and empty table map → context stays nil
     sub = RailsOtelContext::ActiveRecordContext::Subscriber.new
     sub.start('sql.active_record', '1', { name: 'SQL' })
     assert_nil RailsOtelContext::ActiveRecordContext.current
@@ -646,6 +681,156 @@ class ActiveRecordContextTest < Minitest::Test
     end
   end
 
+  # parse_sql_context — SQL table-name parsing for name="SQL" notifications
+  # (counter caches, touch_later, connection.execute)
+
+  def test_parse_sql_context_update
+    with_ar_table_map('users' => 'User') do
+      ctx = RailsOtelContext::ActiveRecordContext.parse_sql_context('UPDATE `users` SET `comments_count` = 5')
+      assert_equal 'User',   ctx[:model_name]
+      assert_equal 'Update', ctx[:method_name]
+    end
+  end
+
+  def test_parse_sql_context_insert
+    with_ar_table_map('orders' => 'Order') do
+      ctx = RailsOtelContext::ActiveRecordContext.parse_sql_context('INSERT INTO `orders` (`state`) VALUES (?)')
+      assert_equal 'Order',  ctx[:model_name]
+      assert_equal 'Insert', ctx[:method_name]
+    end
+  end
+
+  def test_parse_sql_context_insert_ignore
+    with_ar_table_map('events' => 'Event') do
+      ctx = RailsOtelContext::ActiveRecordContext.parse_sql_context('INSERT IGNORE INTO `events` (`name`) VALUES (?)')
+      assert_equal 'Event',  ctx[:model_name]
+      assert_equal 'Insert', ctx[:method_name]
+    end
+  end
+
+  def test_parse_sql_context_delete
+    with_ar_table_map('sessions' => 'Session') do
+      ctx = RailsOtelContext::ActiveRecordContext.parse_sql_context('DELETE FROM `sessions` WHERE id = 1')
+      assert_equal 'Session', ctx[:model_name]
+      assert_equal 'Delete',  ctx[:method_name]
+    end
+  end
+
+  def test_parse_sql_context_select
+    with_ar_table_map('products' => 'Product') do
+      ctx = RailsOtelContext::ActiveRecordContext.parse_sql_context('SELECT * FROM `products` WHERE active = 1')
+      assert_equal 'Product', ctx[:model_name]
+      assert_equal 'Select',  ctx[:method_name]
+    end
+  end
+
+  def test_parse_sql_context_returns_nil_for_unknown_table
+    with_ar_table_map('users' => 'User') do
+      assert_nil RailsOtelContext::ActiveRecordContext.parse_sql_context('UPDATE `widgets` SET x = 1')
+    end
+  end
+
+  def test_parse_sql_context_returns_nil_for_nil_sql
+    assert_nil RailsOtelContext::ActiveRecordContext.parse_sql_context(nil)
+  end
+
+  def test_parse_sql_context_returns_nil_for_unsupported_verb
+    with_ar_table_map('users' => 'User') do
+      assert_nil RailsOtelContext::ActiveRecordContext.parse_sql_context('BEGIN')
+    end
+  end
+
+  def test_subscriber_sets_async_flag_when_payload_async_true
+    sub = RailsOtelContext::ActiveRecordContext::Subscriber.new
+    sub.start('sql.active_record', '1', { name: 'User Load', async: true })
+    assert RailsOtelContext::ActiveRecordContext.current[:async],
+           'async payload flag must be captured in AR context'
+  end
+
+  def test_subscriber_no_async_flag_when_payload_async_absent
+    sub = RailsOtelContext::ActiveRecordContext::Subscriber.new
+    sub.start('sql.active_record', '1', { name: 'User Load' })
+    refute RailsOtelContext::ActiveRecordContext.current[:async]
+  end
+
+  def test_apply_to_span_sets_db_async_when_flagged
+    span = FakeSpan.new(valid_context: true)
+    RailsOtelContext::ActiveRecordContext.apply_to_span(span, { model_name: 'User', method_name: 'Load', async: true })
+    assert span.attributes['db.async']
+  end
+
+  def test_apply_to_span_no_db_async_when_not_flagged
+    span = FakeSpan.new(valid_context: true)
+    RailsOtelContext::ActiveRecordContext.apply_to_span(span, { model_name: 'User', method_name: 'Load' })
+    refute span.attributes.key?('db.async')
+  end
+
+  def test_ar_table_model_map_skips_sti_subclasses
+    # STI: AdminUser shares users table with User.
+    # Map must resolve to the base class, not the last-iterated subclass.
+    # base_class == self  → included; base_class != self → skipped.
+    base = Struct.new(:name) do
+      def self.name = 'User'
+      def self.table_name = 'users'
+      def self.base_class = self
+    end
+    sub = Struct.new(:name) do
+      def self.name = 'AdminUser'
+      def self.table_name = 'users'
+      def self.base_class = base
+    end
+    sub.singleton_class.define_method(:base_class) { base }
+
+    allow_real_descendants([base, sub]) do
+      map = RailsOtelContext::ActiveRecordContext.ar_table_model_map
+      assert_equal 'User', map['users'],
+                   'STI subclass must not overwrite base class in table map'
+    end
+  end
+
+  def test_subscriber_enriches_sql_named_span_when_model_found
+    with_ar_table_map('users' => 'User') do
+      with_current_span(FakeSpan.new(valid_context: true)) do |span|
+        sub = RailsOtelContext::ActiveRecordContext::Subscriber.new
+        sub.start('sql.active_record', '1', {
+                    name: 'SQL',
+                    sql: 'UPDATE `users` SET `comments_count` = COALESCE(`comments_count`, 0) + 1'
+                  })
+        assert_equal 'User',   span.attributes['code.activerecord.model']
+        assert_equal 'Update', span.attributes['code.activerecord.method']
+      end
+    end
+  end
+
+  def test_subscriber_skips_sql_named_span_when_model_not_found
+    with_ar_table_map('users' => 'User') do
+      sub = RailsOtelContext::ActiveRecordContext::Subscriber.new
+      sub.start('sql.active_record', '1', {
+                  name: 'SQL',
+                  sql: 'UPDATE `unknown_table` SET x = 1'
+                })
+      assert_nil RailsOtelContext::ActiveRecordContext.current
+    end
+  end
+
+  def test_subscriber_sql_named_span_applies_formatter
+    RailsOtelContext.configure do |c|
+      c.span_name_formatter = lambda { |_orig, ar|
+        "#{ar[:model_name]}.#{ar[:method_name]}"
+      }
+    end
+    with_ar_table_map('posts' => 'Post') do
+      with_current_span(FakeSpan.new(valid_context: true)) do |span|
+        span.name = 'trilogy.query'
+        sub = RailsOtelContext::ActiveRecordContext::Subscriber.new
+        sub.start('sql.active_record', '1', { name: 'SQL', sql: 'UPDATE `posts` SET views = 1' })
+        assert_equal 'Post.Update', span.name
+      end
+    end
+  ensure
+    RailsOtelContext.reset_configuration!
+  end
+
   private
 
   def with_slow_query_threshold(threshold_ms)
@@ -654,5 +839,40 @@ class ActiveRecordContextTest < Minitest::Test
   ensure
     RailsOtelContext.reset_configuration!
     RailsOtelContext::ActiveRecordContext.clear!
+  end
+
+  def with_ar_table_map(map)
+    RailsOtelContext::ActiveRecordContext.instance_variable_set(:@ar_table_model_map, map)
+    yield
+  ensure
+    RailsOtelContext::ActiveRecordContext.reset_ar_table_model_map!
+  end
+
+  # Temporarily replaces AR::Base.descendants with a controlled list so
+  # ar_table_model_map builds from exactly those classes, then resets the cache.
+  def allow_real_descendants(list)
+    # Ensure AR::Base exists (test env may only have AR::Relation)
+    unless defined?(ActiveRecord::Base)
+      ActiveRecord.const_set(:Base, Class.new)
+    end
+    orig_method = begin
+      ActiveRecord::Base.singleton_class.instance_method(:descendants)
+    rescue StandardError
+      nil
+    end
+    ActiveRecord::Base.define_singleton_method(:descendants) { list }
+    RailsOtelContext::ActiveRecordContext.reset_ar_table_model_map!
+    yield
+  ensure
+    if orig_method
+      ActiveRecord::Base.singleton_class.define_method(:descendants, orig_method)
+    else
+      begin
+        ActiveRecord::Base.singleton_class.remove_method(:descendants)
+      rescue StandardError
+        nil
+      end
+    end
+    RailsOtelContext::ActiveRecordContext.reset_ar_table_model_map!
   end
 end

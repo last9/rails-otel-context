@@ -46,6 +46,11 @@ Metrics/ClassLength:
   Exclude:
     - 'test/**/*'
 
+Metrics/ModuleLength:
+  Max: 150
+  Exclude:
+    - 'test/**/*'
+
 # Tests can have higher complexity for thorough test coverage
 Lint/EnsureReturn:
   Exclude:

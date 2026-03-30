@@ -4,27 +4,38 @@ module RailsOtelContext
   # SpanProcessor that enriches all spans with the calling Ruby class and method name,
   # and optionally with user-defined custom attributes.
   #
-  # Sets two attributes on every span (unless the call stack yields no app-code frame):
+  # Sets span attributes (unless the call stack yields no app-code frame):
   #   - code.namespace  – the class name, e.g. "OrderService", "InvoiceJob"
   #   - code.function   – the method name, e.g. "create", "perform"
+  #   - code.filepath   – app-relative source file
+  #   - code.lineno     – source line number
   #
-  # Class names are extracted from the frame label when available (e.g. "User.find"),
-  # and inferred from the file-path basename otherwise (e.g. order_service.rb → OrderService).
-  #
-  # Frames inside gems or outside app_root are always skipped.
+  # Three-tier call-context resolution (fastest to slowest):
+  #   1. Pushed frame  — O(1) thread-local read. Set by Railtie around_action for
+  #                      controllers, or manually via RailsOtelContext.with_frame.
+  #   2. Stack walk    — O(stack depth). Falls back here when no frame is pushed.
+  #                      DB adapters (Trilogy, PG, MySQL2) additionally overwrite
+  #                      code.* attributes post-query from a shallower stack position,
+  #                      giving the exact call site (e.g. UserRepository#find_active:23).
   #
   # Custom attributes (configured via +custom_span_attributes+) are applied to every span.
   # The callable must return a Hash (or nil) and must be fast — it runs in the hot path
   # of every span creation. Exceptions in the callable are silently rescued to avoid
   # disrupting application request processing.
   class CallContextProcessor
+    include RailsOtelContext::SourceLocation
+
     SPAN_CONTROLLER_ATTR = 'request.controller'
     SPAN_ACTION_ATTR     = 'request.action'
     AR_MODEL_ATTR        = 'code.activerecord.model'
     AR_METHOD_ATTR       = 'code.activerecord.method'
     AR_SCOPE_ATTR        = 'code.activerecord.scope'
     AR_QUERY_COUNT_ATTR  = 'db.query_count'
+    AR_ASYNC_ATTR        = 'db.async'
     ORIG_NAME_ATTR       = 'l9.orig.name'
+
+    # Exposed so SourceLocation mixin can use it for the stack-walk path.
+    attr_reader :app_root
 
     def initialize(app_root:, config: RailsOtelContext.configuration)
       @app_root = app_root.to_s
@@ -49,17 +60,28 @@ module RailsOtelContext
     private
 
     def apply_call_context(span)
+      # Fast path: caller pushed a frame explicitly — O(1), zero allocations.
+      # DB adapters will overwrite this with the exact call site post-query.
+      pushed = FrameContext.current
+      if pushed
+        span.set_attribute('code.namespace', pushed[:class_name])
+        span.set_attribute('code.function', pushed[:method_name]) if pushed[:method_name]
+        return
+      end
+
+      # Fallback: walk the call stack. DB spans without a pushed frame take this
+      # path; the adapter's post-query walk (shallower) will overwrite the result.
       return unless Thread.respond_to?(:each_caller_location)
 
-      context = extract_caller_context
-      return unless context
+      site = call_site_for_app
+      return unless site
 
-      span.set_attribute('code.namespace', context[:class_name])
-      span.set_attribute('code.function', context[:method_name]) if context[:method_name]
-      return unless context[:lineno]
+      span.set_attribute('code.namespace', site[:class_name])
+      span.set_attribute('code.function', site[:method_name]) if site[:method_name]
+      return unless site[:lineno]
 
-      span.set_attribute('code.filepath', context[:filepath])
-      span.set_attribute('code.lineno', context[:lineno])
+      span.set_attribute('code.filepath', site[:filepath])
+      span.set_attribute('code.lineno', site[:lineno])
     end
 
     def apply_request_context(span)
@@ -95,6 +117,7 @@ module RailsOtelContext
       span.set_attribute(AR_METHOD_ATTR, ar_context[:method_name]) if ar_context[:method_name]
       span.set_attribute(AR_SCOPE_ATTR, ar_context[:scope_name]) if ar_context[:scope_name]
       span.set_attribute(AR_QUERY_COUNT_ATTR, ar_context[:query_count]) if ar_context[:query_count]
+      span.set_attribute(AR_ASYNC_ATTR, true) if ar_context[:async]
     end
 
     def apply_span_name_formatter(span, ar_context)
@@ -117,34 +140,6 @@ module RailsOtelContext
       end
     rescue StandardError
       # Never let a user-supplied callback break span processing.
-    end
-
-    def extract_caller_context
-      Thread.each_caller_location do |location|
-        path = location.absolute_path || location.path
-        next unless path&.start_with?(@app_root)
-        next if path.include?('/gems/')
-
-        label    = location.label || ''
-        lineno   = location.lineno
-        filepath = path.delete_prefix("#{@app_root}/")
-
-        # Try label first: "ClassName.method" or "ClassName#method"
-        if label =~ /^([A-Z][a-zA-Z0-9_]*(?:::[A-Z][a-zA-Z0-9_]*)*)(\.|\#)/
-          class_name  = Regexp.last_match(1)
-          method_name = label.split(/[.\#]/, 2).last
-                             &.sub(/^(?:block|rescue|ensure) in /, '')
-          return { class_name: class_name, method_name: method_name, lineno: lineno, filepath: filepath }
-        end
-
-        # Fallback: infer class from file-path basename (snake_case → CamelCase)
-        class_name  = File.basename(path, '.rb').split('_').map(&:capitalize).join
-        method_name = label.sub(/^(?:block|rescue|ensure) in /, '')
-        return { class_name: class_name, method_name: method_name.empty? ? nil : method_name,
-                 lineno: lineno, filepath: filepath }
-      end
-
-      nil
     end
   end
 end

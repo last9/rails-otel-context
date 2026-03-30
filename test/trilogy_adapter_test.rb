@@ -21,11 +21,13 @@ class TrilogyAdapterTest < Minitest::Test
     client_class.prepend(patch)
     client = client_class.new
 
-    with_thread_source('/app/services/payment.rb', 33) do
+    with_thread_source('/app/services/payment_service.rb', 33, label: 'PaymentService#charge') do
       with_current_span_with_valid_context do |span|
         result = client.query('SELECT 1')
         assert_equal :ok_query, result
-        assert_equal 'app/services/payment.rb', span.attributes['code.filepath']
+        assert_equal 'PaymentService', span.attributes['code.namespace']
+        assert_equal 'charge',         span.attributes['code.function']
+        assert_equal 'app/services/payment_service.rb', span.attributes['code.filepath']
         assert_equal 33, span.attributes['code.lineno']
       end
     end
@@ -56,12 +58,13 @@ class TrilogyAdapterTest < Minitest::Test
     client_class.prepend(patch)
     client = client_class.new
 
-    patch.define_singleton_method(:source_location_for_app) { nil }
+    patch.define_singleton_method(:call_site_for_app) { nil }
 
     with_current_span_with_valid_context do |span|
       client.query('SELECT 1')
       refute span.attributes.key?('code.filepath')
       refute span.attributes.key?('code.lineno')
+      refute span.attributes.key?('code.namespace')
     end
   end
 
@@ -104,9 +107,10 @@ class TrilogyAdapterTest < Minitest::Test
     end
   end
 
-  def with_thread_source(path, lineno)
+  def with_thread_source(path, lineno, label: nil)
     thread_singleton = Thread.singleton_class
-    location = OpenStruct.new(absolute_path: File.join(Dir.pwd, path), path: nil, lineno: lineno)
+    location = OpenStruct.new(absolute_path: File.join(Dir.pwd, path), path: nil,
+                              lineno: lineno, label: label)
     had_original = Thread.respond_to?(:each_caller_location)
 
     if had_original
