@@ -46,16 +46,18 @@ module RailsOtelContext
       span.set_attribute('code.lineno',    site[:lineno]) if site[:lineno]
     end
 
-    # Legacy helper kept for callers that only need filepath + lineno.
+    # Legacy helper kept for Redis and ClickHouse adapters that only need filepath + lineno.
+    # Migrate those adapters to call_site_for_app + apply_call_site_to_span to remove this.
     def source_location_for_app
       return unless Thread.respond_to?(:each_caller_location)
 
+      prefix = app_root_prefix
       Thread.each_caller_location do |location|
         path = location.absolute_path || location.path
         next unless path&.start_with?(app_root)
         next if path.include?('/gems/')
 
-        return [path.delete_prefix("#{app_root}/"), location.lineno]
+        return [path.delete_prefix(prefix), location.lineno]
       end
 
       nil
@@ -71,10 +73,14 @@ module RailsOtelContext
 
     private
 
+    def app_root_prefix
+      @app_root_prefix ||= "#{app_root}/"
+    end
+
     def build_call_site(location, path)
       label    = location.label || ''
       lineno   = location.lineno
-      filepath = path.delete_prefix("#{app_root}/")
+      filepath = path.delete_prefix(app_root_prefix)
 
       if label =~ CLASS_LABEL_RE
         class_name  = Regexp.last_match(1)

@@ -50,9 +50,7 @@ module RailsOtelContext
         Thread.current[FRAME_KEY]
       end
 
-      def clear!
-        Thread.current[FRAME_KEY] = nil
-      end
+      alias clear! pop
     end
   end
 

@@ -13,10 +13,12 @@ module RailsOtelContext
   #    Transaction.recent_completed.to_a where the scope method returns before
   #    SQL fires.
   module ActiveRecordContext
-    THREAD_KEY       = :_rails_otel_ctx_ar
-    SCOPE_THREAD_KEY = :_rails_otel_ctx_scope
-    DB_SLOW_ATTR     = 'db.slow'
-    private_constant :THREAD_KEY, :SCOPE_THREAD_KEY
+    THREAD_KEY        = :_rails_otel_ctx_ar
+    SCOPE_THREAD_KEY  = :_rails_otel_ctx_scope
+    TIMING_ID_KEY     = :_rails_otel_ctx_timing_id
+    TIMING_START_KEY  = :_rails_otel_ctx_timing_start
+    DB_SLOW_ATTR      = 'db.slow'
+    private_constant :THREAD_KEY, :SCOPE_THREAD_KEY, :TIMING_ID_KEY, :TIMING_START_KEY
 
     # Frozen regex — only the verb regex remains; table extraction uses index+slice.
     SQL_VERB_RE = /\A(\w+)/i
@@ -28,6 +30,14 @@ module RailsOtelContext
     KW_INTO   = 'INTO '
     KW_FROM   = 'FROM '
     private_constant :KW_UPDATE, :KW_INTO, :KW_FROM
+
+    # Byte values used in extract_table_after for delimiter detection.
+    BYTE_BACKTICK = 96  # `
+    BYTE_DQUOTE   = 34  # "
+    BYTE_SQUOTE   = 39  # '
+    BYTE_SPACE    = 32  # (space)
+    BYTE_COMMA    = 44  # ,
+    private_constant :BYTE_BACKTICK, :BYTE_DQUOTE, :BYTE_SQUOTE, :BYTE_SPACE, :BYTE_COMMA
 
     # Tracks class methods (def self.name) that return an AR::Relation so their
     # name is captured as code.activerecord.scope, complementing ScopeNameTracking
@@ -100,8 +110,8 @@ module RailsOtelContext
         Thread.current[THREAD_KEY] = ctx
 
         if @threshold
-          @timing_id    = id
-          @timing_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+          Thread.current[TIMING_ID_KEY]    = id
+          Thread.current[TIMING_START_KEY] = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         end
 
         # Enrich the current span directly. When OTel instruments via driver-level
@@ -114,9 +124,9 @@ module RailsOtelContext
       end
 
       def finish(_name, id, _payload)
-        if @threshold && @timing_id.equal?(id)
-          elapsed_ms = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - @timing_start) * 1000
-          @timing_id = nil
+        if @threshold && Thread.current[TIMING_ID_KEY].equal?(id)
+          elapsed_ms = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - Thread.current[TIMING_START_KEY]) * 1000
+          Thread.current[TIMING_ID_KEY] = nil
           if elapsed_ms >= @threshold
             span = OpenTelemetry::Trace.current_span
             span.set_attribute(DB_SLOW_ATTR, true) if span.context.valid?
@@ -183,8 +193,10 @@ module RailsOtelContext
     end
 
     def clear!
-      Thread.current[THREAD_KEY] = nil
+      Thread.current[THREAD_KEY]       = nil
       Thread.current[SCOPE_THREAD_KEY] = nil
+      Thread.current[TIMING_ID_KEY]    = nil
+      Thread.current[TIMING_START_KEY] = nil
     end
 
     # Test helpers: set AR context directly for unit tests.
@@ -288,11 +300,12 @@ module RailsOtelContext
 
       start = idx + keyword.length
       first = sql.getbyte(start)
-      start += 1 if first == 96 || first == 34 || first == 39 # rubocop:disable Style/MultipleComparison
+      start += 1 if first == BYTE_BACKTICK || first == BYTE_DQUOTE || first == BYTE_SQUOTE # rubocop:disable Style/MultipleComparison
 
       stop = start
       stop += 1 while stop < sql.length &&
-                      (b = sql.getbyte(stop)) != 32 && b != 96 && b != 34 && b != 39 && b != 44
+                      (b = sql.getbyte(stop)) != BYTE_SPACE &&
+                      b != BYTE_BACKTICK && b != BYTE_DQUOTE && b != BYTE_SQUOTE && b != BYTE_COMMA
 
       stop > start ? sql[start, stop - start] : nil
     end
