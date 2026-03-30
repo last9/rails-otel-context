@@ -61,7 +61,6 @@ module RailsOtelContext
 
     def apply_call_context(span)
       # Fast path: caller pushed a frame explicitly — O(1), zero allocations.
-      # DB adapters will overwrite this with the exact call site post-query.
       pushed = FrameContext.current
       if pushed
         span.set_attribute('code.namespace', pushed[:class_name])
@@ -69,8 +68,7 @@ module RailsOtelContext
         return
       end
 
-      # Fallback: walk the call stack. DB spans without a pushed frame take this
-      # path; the adapter's post-query walk (shallower) will overwrite the result.
+      # Fallback: walk the call stack to find the first app-code frame.
       return unless Thread.respond_to?(:each_caller_location)
 
       site = call_site_for_app

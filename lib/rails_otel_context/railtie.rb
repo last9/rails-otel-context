@@ -18,6 +18,21 @@ module RailsOtelContext
         processor = RailsOtelContext::CallContextProcessor.new(app_root: Rails.root)
         OpenTelemetry.tracer_provider.add_span_processor(processor)
       end
+
+      # Warm the table→model map once at boot (after eager_load! in production so
+      # all descendants are available). Without this, the first SQL-named span on a
+      # cold boot hits an empty map and falls through without model context.
+      ActiveSupport.on_load(:active_record) do
+        RailsOtelContext::ActiveRecordContext.ar_table_model_map
+      end
+    end
+
+    # Reset the table→model map after every code reload in development.
+    # In development, classes are lazy-loaded so the map built on first access
+    # may be empty or stale. to_prepare runs after each reload when all currently
+    # referenced models are loaded, guaranteeing a fresh index.
+    config.to_prepare do
+      RailsOtelContext::ActiveRecordContext.reset_ar_table_model_map!
     end
 
     # Push the controller class + action name as the active frame for every

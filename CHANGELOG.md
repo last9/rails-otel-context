@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1] - 2026-03-31
+
+### Fixed
+- **SQL-named spans not renamed in development**: `ar_table_model_map` was built once lazily, often hitting an empty `ActiveRecord::Base.descendants` in dev (lazy class loading). Added `config.to_prepare` hook in Railtie to reset the map after every code reload so counter-cache `UPDATE`, `INSERT`, and raw `SELECT` spans get model context and are renamed by the formatter.
+- **Cold-boot production gap**: Added `after_initialize` warm-up call so the map is populated before the first request rather than on the first SQL-named event.
+
 ## [0.8.0] - 2026-03-31
 
 ### Added
