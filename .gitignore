@@ -43,6 +43,25 @@
 # Gem
 Gemfile.lock
 
+# Data & media files — never commit screenshots, exports, or sample data
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+*.svg
+*.ico
+*.mp4
+*.mp3
+*.wav
+*.csv
+*.tsv
+*.xls
+*.xlsx
+*.pdf
+*.zip
+*.tar.gz
+
 # Logs
 *.log
 
