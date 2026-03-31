@@ -3,7 +3,7 @@
 [![CI](https://github.com/last9/rails-otel-context/actions/workflows/ci.yml/badge.svg)](https://github.com/last9/rails-otel-context/actions/workflows/ci.yml)
 [![Gem Version](https://img.shields.io/gem/v/rails-otel-context)](https://rubygems.org/gems/rails-otel-context)
 
-OpenTelemetry spans for Rails know a lot about your database. They know the SQL. They know how long it took. What they don't know is *which code fired that query* — the model, the scope, the controller, the line number. This gem fixes that.
+OpenTelemetry spans for Rails know a lot about your database. They know the SQL. They know how long it took. What they don't know is *which code fired that query* — the service object, the scope, the job, the line number. This gem fixes that.
 
 ## Before and after
 
@@ -26,111 +26,144 @@ With this gem:
   "db.system": "postgresql",
   "db.statement": "SELECT * FROM transactions WHERE ...",
   "duration_ms": 450,
-  "code.activerecord.model": "Transaction",
+  "code.activerecord.model":  "Transaction",
   "code.activerecord.method": "Load",
-  "code.activerecord.scope": "recent_completed",
-  "code.namespace": "DashboardController",
-  "code.function": "index",
-  "code.filepath": "app/controllers/dashboard_controller.rb",
-  "code.lineno": 14,
-  "db.query_count": 47
+  "code.activerecord.scope":  "recent_completed",
+  "code.namespace":           "BillingService",
+  "code.function":            "monthly_summary",
+  "code.filepath":            "app/services/billing_service.rb",
+  "code.lineno":              42,
+  "rails.controller":         "ReportsController",
+  "rails.action":             "index",
+  "db.query_count":           3
 }
 ```
 
-You navigate straight to the offending line. No grepping, no guessing.
+Notice `code.namespace` is `BillingService`, not `ReportsController` — the gem walks the call stack and finds the service object that actually issued the query, not the controller that dispatched the request. No configuration required.
 
 ## Installation
 
 ```ruby
-gem 'rails-otel-context', '~> 0.7'
+gem 'rails-otel-context', '~> 0.9'
 ```
 
-That's it. Everything installs automatically when Rails boots.
+Add the gem, boot Rails. Everything else happens automatically.
+
+## What gets added to your spans
+
+Every span — DB, Redis, HTTP outbound, custom — gets:
+
+| Attribute | Example | Where it comes from |
+|---|---|---|
+| `code.namespace` | `"BillingService"` | Nearest app-code class in the call stack |
+| `code.function` | `"monthly_summary"` | Method within that class |
+| `code.filepath` | `"app/services/billing_service.rb"` | App-relative path |
+| `code.lineno` | `42` | Source line number |
+| `rails.controller` | `"ReportsController"` | Current Rails controller (set for every request) |
+| `rails.action` | `"index"` | Current Rails action |
+| `rails.job` | `"MonthlyInvoiceJob"` | ActiveJob class (set for every job, mutually exclusive with `rails.controller`) |
+
+DB spans additionally get:
+
+| Attribute | Example | Description |
+|---|---|---|
+| `code.activerecord.model` | `"Transaction"` | ActiveRecord model |
+| `code.activerecord.method` | `"Load"` | AR operation (Load, Count, Update…) |
+| `code.activerecord.scope` | `"recent_completed"` | Named scope or class method |
+| `db.query_count` | `3` | Occurrence count this request — 2nd+ flags N+1 patterns |
+| `db.slow` | `true` | Set when duration ≥ `slow_query_threshold_ms` |
+| `db.async` | `true` | Set when issued via `load_async` (Rails 7.1+) |
 
 ## Configuration
 
-The defaults are sensible. A production initializer that gets the most out of this gem:
+Zero configuration gets you everything above. The optional initializer adds span naming and slow-query detection:
 
 ```ruby
 # config/initializers/rails_otel_context.rb
 RailsOtelContext.configure do |c|
-  # Rename DB spans to Model.scope — makes traces scannable at a glance
+  # Rename DB spans from "SELECT" to "Transaction.recent_completed"
   c.span_name_formatter = ->(original, ar) {
     model = ar[:model_name]
     return original unless model
 
-    scope = ar[:scope_name] ||
-            (ar[:code_function] if ar[:code_namespace] == model && !ar[:code_function]&.start_with?('<')) ||
-            ar[:method_name]
-    "#{model}.#{scope}"
+    method = ar[:scope_name] ||
+             (ar[:code_function] if ar[:code_namespace] == model && !ar[:code_function]&.start_with?('<')) ||
+             ar[:method_name]
+    "#{model}.#{method}"
   }
 
-  # Carry controller + action name into every DB span fired during the request
-  c.request_context_enabled = true
-
-  # Flag slow queries (sets db.slow: true on spans exceeding the threshold)
+  # Flag slow queries
   c.slow_query_threshold_ms = 500
 
-  # Attach any per-request context to every span in the trace
-  c.custom_span_attributes = -> { { 'team' => Current.team } if Current.team }
+  # Attach any per-request context to every span
+  c.custom_span_attributes = -> { { 'tenant' => Current.tenant } if Current.tenant }
 end
 ```
 
-## What gets added to your spans
+## How `code.namespace` / `code.function` works
 
-| Attribute | Example | Description |
+On every span start, the gem walks the Ruby call stack (`Thread.each_caller_location`) and finds the first frame inside `Rails.root`. That frame becomes the four `code.*` attributes.
+
+This means the right class shows up automatically at every layer:
+
+| Caller | `code.namespace` | `code.function` |
 |---|---|---|
-| `code.activerecord.model` | `"Transaction"` | ActiveRecord model name |
-| `code.activerecord.method` | `"Load"` | AR operation (Load, Count, Update…) |
-| `code.activerecord.scope` | `"recent_completed"` | Named scope or class method that produced the query |
-| `code.namespace` | `"DashboardController"` | Ruby class that triggered the span |
-| `code.function` | `"index"` | Method name within that class |
-| `code.filepath` | `"app/controllers/..."` | App-relative source file |
-| `code.lineno` | `14` | Line number |
-| `request.controller` | `"DashboardController"` | Rails controller (requires `request_context_enabled`) |
-| `request.action` | `"index"` | Rails action (requires `request_context_enabled`) |
-| `db.query_count` | `47` | How many times this model+operation was queried in this request — appears only on the 2nd+ occurrence, which flags N+1 patterns |
-| `db.slow` | `true` | Set when query duration exceeds `slow_query_threshold_ms` |
-| `db.async` | `true` | Set when query was issued via `load_async` (Rails 7.1+) |
+| `ReportsController#index` calls `BillingService#monthly_summary` which queries | `BillingService` | `monthly_summary` |
+| `UserRepository#find_active` queries directly | `UserRepository` | `find_active` |
+| `OrdersController#create` queries directly | `OrdersController` | `create` |
+| `MonthlyInvoiceJob#perform` queries | `MonthlyInvoiceJob` | `perform` |
+
+No `include` statements. No `with_frame` calls. The nearest frame wins.
+
+### Override for hot paths
+
+The stack walk is O(stack depth) — roughly 15–25 frame iterations before reaching app code. For code paths that create thousands of spans per second, `FrameContext.with_frame` replaces the walk with a single thread-local read:
+
+```ruby
+class ReportingPipeline
+  include RailsOtelContext::Frameable
+
+  def run
+    # All spans inside this block skip the stack walk.
+    # code.namespace: "ReportingPipeline", code.function: "run"
+    with_otel_frame { process_all_accounts }
+  end
+end
+```
+
+The pushed frame takes priority for the duration of the block. Outside the block, automatic stack-walk resumes.
 
 ## Span naming
 
-Without a formatter, DB spans arrive named by the driver (`SELECT`, `INSERT`). The formatter in the example above renames them using what this gem knows about each query:
+Without a formatter, DB spans carry the driver's name (`SELECT`, `INSERT`). With the example formatter above:
 
-| What fired the query | Available context | Span name |
-|---|---|---|
-| `Transaction.recent_completed.to_a` | `scope_name: "recent_completed"` | `Transaction.recent_completed` |
-| `Transaction.total_revenue` | `code_function: "total_revenue"` | `Transaction.total_revenue` |
-| `Transaction.where(...).first` | `method_name: "Load"` | `Transaction.Load` |
-| `record.update(...)` | `method_name: "Update"` | `Transaction.Update` |
-| Counter cache, `connection.execute` | SQL parsed → table mapped to model | `User.Update` |
+| Query | Result |
+|---|---|
+| `Transaction.recent_completed.to_a` | `Transaction.recent_completed` |
+| `Transaction.total_revenue` (class method) | `Transaction.total_revenue` |
+| `Transaction.where(...).first` | `Transaction.Load` |
+| `record.update(...)` | `Transaction.Update` |
+| Counter cache / `connection.execute` | `User.Update` (SQL parsed → table → model) |
 
-The original span name is preserved in `l9.orig.name` so you can always filter on the raw driver operation.
+The original name is preserved in `l9.orig.name`.
 
 ### Counter caches and raw SQL
 
-Rails counter caches, `touch_later`, and `connection.execute` calls fire `sql.active_record` with `payload[:name] = "SQL"` rather than `"User Update"`. The gem parses the SQL statement directly and maps the table name back to the AR model:
+Rails counter caches, `touch_later`, and `connection.execute` fire `sql.active_record` with `payload[:name] = "SQL"`. The gem parses the statement and maps the table back to an AR model:
 
 ```
-UPDATE `users` SET `users`.`comments_count` = COALESCE(...)
-  → code.activerecord.model: "User"
-  → code.activerecord.method: "Update"
-  → span renamed to "User.Update" (with formatter)
-```
-
-The table→model map is built from `AR::Base.descendants` on first use. In production with `eager_load!` this is always correct. In development, call this after a code reload if you see stale model names:
-
-```ruby
-RailsOtelContext::ActiveRecordContext.reset_ar_table_model_map!
+UPDATE `users` SET `users`.`comments_count` = ...
+  → code.activerecord.model: "User", method: "Update"
+  → span renamed to "User.Update"
 ```
 
 ### Scope tracking
 
-The gem captures scope names from both the `scope` macro and plain class methods that return a relation:
+Both `scope` macro methods and plain class methods returning a Relation are captured:
 
 ```ruby
 class Transaction < ApplicationRecord
-  scope :recent_completed, -> { where(...) }  # captured as code.activerecord.scope
+  scope :recent_completed, -> { where(...) }  # code.activerecord.scope: "recent_completed"
 
   def self.for_account(id)                     # also captured
     where(account_id: id)
@@ -138,25 +171,36 @@ class Transaction < ApplicationRecord
 end
 ```
 
-## Redis
+## Redis and ClickHouse
 
-Redis source location tracking is off by default — it fires on every cache read and most Redis calls are fast. Turn it on when debugging:
+Redis and ClickHouse spans get the same `code.*` attributes pointing to the app-code frame that issued the call:
 
-```ruby
-c.redis_source_enabled = true
+```json
+{
+  "name": "SET",
+  "db.system": "redis",
+  "code.namespace": "SessionStore",
+  "code.function": "write",
+  "code.filepath": "app/lib/session_store.rb",
+  "code.lineno": 18,
+  "rails.controller": "SessionsController",
+  "rails.action": "create"
+}
 ```
 
-## ClickHouse
+## Performance
 
-No official OTel instrumentation exists for ClickHouse. This gem creates client spans automatically for `ClickHouse::Client`, `ClickHouse::Connection`, and `Clickhouse::Client`.
+### Per-span cost
 
-## Benchmarks
+`CallContextProcessor#on_start` fires for every span. The main costs:
 
-The subscriber runs in the hot path of every SQL query. Two scripts live in `bench/`:
+**Stack walk (default, O(stack depth))**: `Thread.each_caller_location` iterates lazily and stops at the first app-code frame. Typically 15–25 frame checks through Rack/Rails/OTel internals. Each miss checks `absolute_path.start_with?(app_root)` — a string prefix test. On a hit, `build_call_site` allocates ~6–8 short-lived objects (a Hash, a few Strings). These are collected in the next minor GC; they do not accumulate.
 
-### Allocation guard (also runs in CI)
+**Explicit override (O(1))**: `FrameContext.with_frame` / `Frameable#with_otel_frame` replace the walk with one thread-local read per span. Use this for code paths generating thousands of spans per second. For a typical 10–20 span request, the walk overhead is ~5–10 µs — measure before optimizing.
 
-Verifies the per-call allocation budget hasn't regressed. Deterministic — same count every run regardless of machine:
+### AR subscriber allocation budget
+
+The `sql.active_record` subscriber runs on every SQL query. The budget is enforced in CI:
 
 ```
 ruby bench/allocation_guard.rb
@@ -165,21 +209,17 @@ ruby bench/allocation_guard.rb
 ```
 PASS  named query (User Load): 4.0 allocs/call (budget: 4)
 PASS  SQL-named counter cache UPDATE: 6.0 allocs/call (budget: 6)
-
-All allocation budgets met.
 ```
 
-Exits 1 if any path exceeds its budget. Update the budget constant in `bench/allocation_guard.rb` whenever a deliberate trade-off is made.
+Any increase requires updating the budget constant — a deliberate, reviewed decision.
 
-### Full profiling suite
-
-Throughput, per-call allocations with top allocating lines, and a StackProf CPU flamegraph:
+### Full profiling
 
 ```
 bundle exec ruby bench/subscriber_hot_path.rb
 ```
 
-The flamegraph dump lands at `tmp/subscriber.dump`. View it with:
+Outputs throughput, per-call allocations with top allocating lines, and a StackProf CPU flamegraph at `tmp/subscriber.dump`:
 
 ```
 stackprof --flamegraph tmp/subscriber.dump | open -f -a 'Google Chrome'
@@ -191,6 +231,12 @@ stackprof --flamegraph tmp/subscriber.dump | open -f -a 'Google Chrome'
 |---|---|---|
 | Named AR query (`User Load`) | 4 objects | ~900k i/s |
 | SQL counter cache (`name=SQL`) | 6 objects | ~650k i/s |
+
+### Boot cost
+
+`ScopeNameTracking` hooks `singleton_method_added` on every AR model to detect class methods returning a Relation. On a large app (100+ models), this fires thousands of times during warm-up — one `source_location` call and one method redefinition per class method in `app/`. This is a one-time startup cost, not a per-request cost.
+
+`ar_table_model_map` is built once at boot from `AR::Base.descendants`. In development, call `RailsOtelContext::ActiveRecordContext.reset_ar_table_model_map!` after a code reload if model names look stale.
 
 ## Requirements
 
