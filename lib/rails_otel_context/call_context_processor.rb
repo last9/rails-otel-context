@@ -111,11 +111,11 @@ module RailsOtelContext
       end
 
       job = RequestContext.job
-      if job
-        span.set_attribute(SPAN_JOB_ATTR, job)
-        latency = RequestContext.queue_latency_ms
-        span.set_attribute(SPAN_JOB_QUEUE_LATENCY_ATTR, latency) if latency
-      end
+      return unless job
+
+      span.set_attribute(SPAN_JOB_ATTR, job)
+      latency = RequestContext.queue_latency_ms
+      span.set_attribute(SPAN_JOB_QUEUE_LATENCY_ATTR, latency) if latency
     end
 
     def apply_db_context(span)
