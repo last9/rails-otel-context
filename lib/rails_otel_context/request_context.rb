@@ -1,25 +1,35 @@
 # frozen_string_literal: true
 
 module RailsOtelContext
-  # Thread-local storage for request-scoped context that gets propagated
-  # to all spans within a request. Uses raw Thread.current for minimal overhead —
-  # no object allocation, no mutex, ~5ns per read/write.
+  # Thread-local storage for request/job-scoped context propagated to all spans.
+  # Uses raw Thread.current — no object allocation, no mutex, ~5ns per read/write.
   #
-  # Lifecycle:
+  # Controller lifecycle:
   #   1. Railtie's around_action sets controller + action at request start
   #   2. CallContextProcessor reads them on every child span's on_start
   #   3. around_action's ensure block clears them when the request ends
   #
-  # Thread safety: each Puma thread has its own slot — no sharing, no contention.
+  # Job lifecycle:
+  #   1. Railtie's around_perform sets job at job start
+  #   2. CallContextProcessor reads it on every child span's on_start
+  #   3. around_perform's ensure block clears it when the job ends
+  #
+  # Thread safety: each Puma/Sidekiq thread owns its slot — no sharing, no contention.
   module RequestContext
     CONTROLLER_KEY  = :_rails_otel_ctx_controller
     ACTION_KEY      = :_rails_otel_ctx_action
+    JOB_KEY         = :_rails_otel_ctx_job
     QUERY_COUNT_KEY = :_rails_otel_ctx_qcount
 
     class << self
       def set(controller:, action:)
         Thread.current[CONTROLLER_KEY]  = controller
         Thread.current[ACTION_KEY]      = action
+        Thread.current[QUERY_COUNT_KEY] = nil
+      end
+
+      def set_job(job_class:)
+        Thread.current[JOB_KEY]         = job_class
         Thread.current[QUERY_COUNT_KEY] = nil
       end
 
@@ -37,9 +47,19 @@ module RailsOtelContext
         Thread.current[ACTION_KEY]
       end
 
+      def job
+        Thread.current[JOB_KEY]
+      end
+
       def clear!
         Thread.current[CONTROLLER_KEY]  = nil
         Thread.current[ACTION_KEY]      = nil
+        Thread.current[JOB_KEY]         = nil
+        Thread.current[QUERY_COUNT_KEY] = nil
+      end
+
+      def clear_job!
+        Thread.current[JOB_KEY]         = nil
         Thread.current[QUERY_COUNT_KEY] = nil
       end
     end

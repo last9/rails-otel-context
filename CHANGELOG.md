@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-03-31
+
+### Changed (breaking)
+- **`rails.*` attributes on every span**: renamed `request.controller` → `rails.controller` and `request.action` → `rails.action`. These attributes now appear on **all** spans (HTTP, DB, cache, custom), not just DB spans, and are always enabled — `request_context_enabled` is now a no-op (kept for backwards compat).
+- **`code.namespace`/`code.function` = nearest frame, zero manual work**: removed `install_frame_context` from the Railtie. The controller frame is no longer auto-pushed into `FrameContext`. `CallContextProcessor` now always stack-walks to find the nearest app-code frame, so service objects, repositories, and jobs all show up correctly without `include Frameable` or `with_otel_frame` calls. `FrameContext.with_frame` / `Frameable` still work as explicit overrides.
+
+### Added
+- **`rails.job` on every span inside a job**: new `install_job_context` Railtie initializer hooks `ActiveJob::Base.around_perform`, sets `RequestContext.job = job.class.name`, and clears in ensure. Every DB, HTTP, and custom span created inside a job now carries `rails.job: "MyJobClass"`.
+- **`RequestContext.set_job` / `RequestContext.job` / `RequestContext.clear_job!`**: new public API for the job context slot.
+
 ## [0.8.5] - 2026-03-31
 
 ### Fixed

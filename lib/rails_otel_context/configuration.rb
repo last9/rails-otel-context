@@ -5,8 +5,11 @@ module RailsOtelContext
     attr_accessor :redis_source_enabled,
                   :clickhouse_enabled,
                   :span_name_formatter,
-                  :request_context_enabled,
                   :slow_query_threshold_ms
+
+    # Deprecated: rails.controller / rails.action / rails.job are now always set
+    # on every span. This option is kept for backwards compatibility and has no effect.
+    attr_accessor :request_context_enabled
 
     attr_reader :custom_span_attributes
 

@@ -35,41 +35,33 @@ module RailsOtelContext
       RailsOtelContext::ActiveRecordContext.reset_ar_table_model_map!
     end
 
-    # Push the controller class + action name as the active frame for every
-    # controller action. Replaces the O(stack-depth) walk with a O(1) thread-local
-    # read for every span created during the action. Always-on — no config gate.
-    initializer 'rails_otel_context.install_frame_context' do
+    # Capture controller + action for every request and propagate them to all
+    # child spans via RequestContext. Also resets the N+1 query counter at both
+    # the start and end of every request to prevent bleed across Puma thread reuse.
+    # Always-on — no config gate.
+    initializer 'rails_otel_context.install_request_context' do
       ActiveSupport.on_load(:action_controller) do
         around_action do |_controller, block|
-          # Reset N+1 query counter at the start of every request so counts
-          # never bleed across requests on Puma's reused threads. This runs
-          # regardless of request_context_enabled, which only gates whether
-          # RequestContext.set is called (and would reset it there too).
-          Thread.current[RailsOtelContext::RequestContext::QUERY_COUNT_KEY] = nil
-          RailsOtelContext::FrameContext.with_frame(
-            class_name: self.class.name,
-            method_name: action_name
-          ) { block.call }
+          RailsOtelContext::RequestContext.set(
+            controller: self.class.name,
+            action: action_name
+          )
+          block.call
         ensure
-          Thread.current[RailsOtelContext::RequestContext::QUERY_COUNT_KEY] = nil
+          RailsOtelContext::RequestContext.clear!
         end
       end
     end
 
-    # Install request context capture on ActionController when it loads.
-    # Uses around_action with ensure for leak-proof cleanup on exceptions.
-    initializer 'rails_otel_context.install_request_context' do
-      ActiveSupport.on_load(:action_controller) do
-        if RailsOtelContext.configuration.request_context_enabled
-          around_action do |_controller, block|
-            RailsOtelContext::RequestContext.set(
-              controller: self.class.name,
-              action: action_name
-            )
-            block.call
-          ensure
-            RailsOtelContext::RequestContext.clear!
-          end
+    # Capture job class name for every ActiveJob execution and propagate it to all
+    # child spans via RequestContext so rails.job appears on every span in the job.
+    initializer 'rails_otel_context.install_job_context' do
+      ActiveSupport.on_load(:active_job) do
+        around_perform do |_job, block|
+          RailsOtelContext::RequestContext.set_job(job_class: self.class.name)
+          block.call
+        ensure
+          RailsOtelContext::RequestContext.clear_job!
         end
       end
     end

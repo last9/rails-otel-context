@@ -1,32 +1,32 @@
 # frozen_string_literal: true
 
 module RailsOtelContext
-  # SpanProcessor that enriches all spans with the calling Ruby class and method name,
-  # and optionally with user-defined custom attributes.
+  # SpanProcessor that enriches ALL spans with:
+  #   - code.namespace / code.function / code.filepath / code.lineno
+  #     (nearest app-code frame from the call stack — automatic, no manual setup)
+  #   - rails.controller / rails.action   (when inside a controller action)
+  #   - rails.job                         (when inside a job)
   #
-  # Sets span attributes (unless the call stack yields no app-code frame):
-  #   - code.namespace  – the class name, e.g. "OrderService", "InvoiceJob"
-  #   - code.function   – the method name, e.g. "create", "perform"
-  #   - code.filepath   – app-relative source file
-  #   - code.lineno     – source line number
+  # Call-context resolution:
+  #   1. Explicit override — O(1). If app code calls FrameContext.with_frame (or
+  #      includes Frameable), that frame wins. Use this to intentionally override
+  #      the automatic nearest-frame (e.g., to expose a service boundary rather
+  #      than the inner repo it delegates to).
+  #   2. Stack walk — O(stack depth). Default path when no override is active.
+  #      DB adapters (Trilogy, PG, MySQL2, Redis, ClickHouse) additionally overwrite
+  #      code.* post-query from a shallower position, giving exact call-site precision.
   #
-  # Three-tier call-context resolution (fastest to slowest):
-  #   1. Pushed frame  — O(1) thread-local read. Set by Railtie around_action for
-  #                      controllers, or manually via RailsOtelContext.with_frame.
-  #   2. Stack walk    — O(stack depth). Falls back here when no frame is pushed.
-  #                      DB adapters (Trilogy, PG, MySQL2) additionally overwrite
-  #                      code.* attributes post-query from a shallower stack position,
-  #                      giving the exact call site (e.g. UserRepository#find_active:23).
+  # rails.* attributes come from RequestContext (thread-local set by Railtie hooks)
+  # and are applied unconditionally — no config gate.
   #
-  # Custom attributes (configured via +custom_span_attributes+) are applied to every span.
-  # The callable must return a Hash (or nil) and must be fast — it runs in the hot path
-  # of every span creation. Exceptions in the callable are silently rescued to avoid
-  # disrupting application request processing.
+  # Custom attributes (configured via +custom_span_attributes+) are also applied.
+  # The callable must return a Hash (or nil) and must be fast — hot path per span.
   class CallContextProcessor
     include RailsOtelContext::SourceLocation
 
-    SPAN_CONTROLLER_ATTR = 'request.controller'
-    SPAN_ACTION_ATTR     = 'request.action'
+    SPAN_CONTROLLER_ATTR = 'rails.controller'
+    SPAN_ACTION_ATTR     = 'rails.action'
+    SPAN_JOB_ATTR        = 'rails.job'
     AR_MODEL_ATTR        = 'code.activerecord.model'
     AR_METHOD_ATTR       = 'code.activerecord.method'
     AR_SCOPE_ATTR        = 'code.activerecord.scope'
@@ -38,16 +38,15 @@ module RailsOtelContext
     attr_reader :app_root
 
     def initialize(app_root:, config: RailsOtelContext.configuration)
-      @app_root = app_root.to_s
-      @request_context_enabled     = config.request_context_enabled
-      @custom_span_attributes      = config.custom_span_attributes
-      @span_name_formatter         = config.span_name_formatter
-      @slow_query_threshold_ms     = config.slow_query_threshold_ms
+      @app_root                = app_root.to_s
+      @custom_span_attributes  = config.custom_span_attributes
+      @span_name_formatter     = config.span_name_formatter
+      @slow_query_threshold_ms = config.slow_query_threshold_ms
     end
 
     def on_start(span, _parent_context)
       apply_call_context(span)
-      apply_request_context(span) if @request_context_enabled
+      apply_request_context(span)
       apply_db_context(span)
       apply_custom_attributes(span) if @custom_span_attributes
     end
@@ -79,34 +78,39 @@ module RailsOtelContext
     private
 
     def apply_call_context(span)
-      # Fast path: caller pushed a frame explicitly — O(1), zero allocations.
+      # Explicit override: app code called FrameContext.with_frame (or Frameable).
+      # O(1) — no stack walk. Takes priority over automatic detection.
       pushed = FrameContext.current
       if pushed
         span.set_attribute('code.namespace', pushed[:class_name])
-        span.set_attribute('code.function', pushed[:method_name]) if pushed[:method_name]
+        span.set_attribute('code.function',  pushed[:method_name]) if pushed[:method_name]
         return
       end
 
-      # Fallback: walk the call stack to find the first app-code frame.
+      # Default: walk the call stack to find the nearest app-code frame.
       return unless Thread.respond_to?(:each_caller_location)
 
       site = call_site_for_app
       return unless site
 
       span.set_attribute('code.namespace', site[:class_name])
-      span.set_attribute('code.function', site[:method_name]) if site[:method_name]
+      span.set_attribute('code.function',  site[:method_name]) if site[:method_name]
       return unless site[:lineno]
 
       span.set_attribute('code.filepath', site[:filepath])
-      span.set_attribute('code.lineno', site[:lineno])
+      span.set_attribute('code.lineno',   site[:lineno])
     end
 
     def apply_request_context(span)
       controller, action = RequestContext.fetch
-      return unless controller
+      if controller
+        span.set_attribute(SPAN_CONTROLLER_ATTR, controller)
+        span.set_attribute(SPAN_ACTION_ATTR, action) if action
+        return
+      end
 
-      span.set_attribute(SPAN_CONTROLLER_ATTR, controller)
-      span.set_attribute(SPAN_ACTION_ATTR, action) if action
+      job = RequestContext.job
+      span.set_attribute(SPAN_JOB_ATTR, job) if job
     end
 
     def apply_db_context(span)

@@ -63,45 +63,31 @@ class RailtieTest < Minitest::Test
     end
   end
 
-  def test_frame_context_around_action_resets_query_count_at_request_start
+  # ---------------------------------------------------------------------------
+  # install_request_context — the single around_action hook
+  # ---------------------------------------------------------------------------
+
+  def test_around_action_resets_query_count_at_request_start
     Thread.current[RailsOtelContext::RequestContext::QUERY_COUNT_KEY] = { 'User.Load' => 5 }
     count_at_start = :not_checked
 
-    with_frame_context_action('OrdersController', 'create') do
+    with_request_context_action('OrdersController', 'create') do
       count_at_start = Thread.current[RailsOtelContext::RequestContext::QUERY_COUNT_KEY]
     end
 
-    assert_nil count_at_start, 'QUERY_COUNT_KEY must be nil at request start (N+1 bleed fix)'
+    assert_nil count_at_start, 'QUERY_COUNT_KEY must be nil at request start'
   end
 
-  def test_frame_context_around_action_resets_query_count_after_request
-    with_frame_context_action('OrdersController', 'create') do
+  def test_around_action_resets_query_count_after_request
+    with_request_context_action('OrdersController', 'create') do
       Thread.current[RailsOtelContext::RequestContext::QUERY_COUNT_KEY] = { 'User.Load' => 2 }
     end
 
     assert_nil Thread.current[RailsOtelContext::RequestContext::QUERY_COUNT_KEY],
-               'QUERY_COUNT_KEY must be nil after request to avoid thread-reuse bleed'
+               'QUERY_COUNT_KEY must be nil after request (thread-reuse bleed prevention)'
   end
 
-  def test_frame_context_around_action_pushes_frame_during_action
-    frame_during = nil
-
-    with_frame_context_action('UsersController', 'index') do
-      frame_during = RailsOtelContext::FrameContext.current
-    end
-
-    assert_equal 'UsersController', frame_during&.fetch(:class_name)
-    assert_equal 'index',           frame_during&.fetch(:method_name)
-  end
-
-  def test_frame_context_around_action_clears_frame_after_action
-    with_frame_context_action('UsersController', 'index') { }
-
-    assert_nil RailsOtelContext::FrameContext.current
-  end
-
-  def test_request_context_sets_controller_and_action_when_enabled
-    RailsOtelContext.configure { |c| c.request_context_enabled = true }
+  def test_around_action_sets_controller_and_action_during_action
     controller_during = nil
     action_during     = nil
 
@@ -114,23 +100,64 @@ class RailtieTest < Minitest::Test
     assert_equal 'show',               action_during
   end
 
-  def test_request_context_clears_after_action_when_enabled
-    RailsOtelContext.configure { |c| c.request_context_enabled = true }
-
+  def test_around_action_clears_context_after_action
     with_request_context_action('ProductsController', 'show') { }
 
     assert_nil RailsOtelContext::RequestContext.controller
     assert_nil RailsOtelContext::RequestContext.action
   end
 
-  def test_request_context_not_registered_when_disabled
+  def test_only_one_around_action_registered
     captured = []
     stub_class = build_stub_controller_class('UsersController', 'index', captured)
     ActiveSupport.run_load_hooks(:action_controller, stub_class)
 
     assert_equal 1, captured.size,
-                 'only install_frame_context should register an around_action when request_context disabled'
+                 'exactly one around_action should be registered (install_request_context)'
   end
+
+  # ---------------------------------------------------------------------------
+  # install_job_context
+  # ---------------------------------------------------------------------------
+
+  def test_job_context_sets_job_class_during_perform
+    job_during = nil
+
+    with_job_context_perform('WeeklyReportJob') do
+      job_during = RailsOtelContext::RequestContext.job
+    end
+
+    assert_equal 'WeeklyReportJob', job_during
+  end
+
+  def test_job_context_clears_after_perform
+    with_job_context_perform('WeeklyReportJob') { }
+
+    assert_nil RailsOtelContext::RequestContext.job
+  end
+
+  def test_job_context_resets_query_count_at_job_start
+    Thread.current[RailsOtelContext::RequestContext::QUERY_COUNT_KEY] = { 'User.Load' => 3 }
+    count_at_start = :not_checked
+
+    with_job_context_perform('InvoiceJob') do
+      count_at_start = Thread.current[RailsOtelContext::RequestContext::QUERY_COUNT_KEY]
+    end
+
+    assert_nil count_at_start, 'QUERY_COUNT_KEY must be nil at job start'
+  end
+
+  def test_job_context_resets_query_count_after_perform
+    with_job_context_perform('InvoiceJob') do
+      Thread.current[RailsOtelContext::RequestContext::QUERY_COUNT_KEY] = { 'Order.Load' => 4 }
+    end
+
+    assert_nil Thread.current[RailsOtelContext::RequestContext::QUERY_COUNT_KEY]
+  end
+
+  # ---------------------------------------------------------------------------
+  # to_prepare / after_initialize — AR table map
+  # ---------------------------------------------------------------------------
 
   def test_to_prepare_resets_ar_table_model_map
     RailsOtelContext::ActiveRecordContext.ar_table_model_map
@@ -157,6 +184,13 @@ class RailtieTest < Minitest::Test
     stub
   end
 
+  def build_stub_job_class(job_class_name, captured_blocks)
+    stub = Class.new
+    stub.define_singleton_method(:name)           { job_class_name }
+    stub.define_singleton_method(:around_perform) { |&blk| captured_blocks << blk }
+    stub
+  end
+
   def fire_around_action(stub_class, action_name, action_block, around_block)
     instance = stub_class.new
     instance.define_singleton_method(:action_name) { action_name }
@@ -164,20 +198,23 @@ class RailtieTest < Minitest::Test
     instance.instance_exec(instance, action_block, &around_block)
   end
 
-  # hook_index 0 = install_frame_context (always registered),
-  # hook_index 1 = install_request_context (registered only when enabled)
-  def with_action_hook(class_name, action_name, hook_index:, &action)
-    captured = []
-    stub     = build_stub_controller_class(class_name, action_name, captured)
-    ActiveSupport.run_load_hooks(:action_controller, stub)
-    fire_around_action(stub, action_name, action, captured[hook_index])
-  end
-
-  def with_frame_context_action(class_name, action_name, &action)
-    with_action_hook(class_name, action_name, hook_index: 0, &action)
+  def fire_around_perform(stub_job_class, perform_block, around_block)
+    instance = stub_job_class.new
+    instance.define_singleton_method(:class) { stub_job_class }
+    instance.instance_exec(instance, perform_block, &around_block)
   end
 
   def with_request_context_action(class_name, action_name, &action)
-    with_action_hook(class_name, action_name, hook_index: 1, &action)
+    captured = []
+    stub     = build_stub_controller_class(class_name, action_name, captured)
+    ActiveSupport.run_load_hooks(:action_controller, stub)
+    fire_around_action(stub, action_name, action, captured[0])
+  end
+
+  def with_job_context_perform(job_class_name, &perform_block)
+    captured = []
+    stub     = build_stub_job_class(job_class_name, captured)
+    ActiveSupport.run_load_hooks(:active_job, stub)
+    fire_around_perform(stub, perform_block, captured[0])
   end
 end
