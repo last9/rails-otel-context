@@ -164,17 +164,20 @@ class RailtieTest < Minitest::Test
     instance.instance_exec(instance, action_block, &around_block)
   end
 
-  def with_frame_context_action(class_name, action_name, &action)
+  # hook_index 0 = install_frame_context (always registered),
+  # hook_index 1 = install_request_context (registered only when enabled)
+  def with_action_hook(class_name, action_name, hook_index:, &action)
     captured = []
     stub     = build_stub_controller_class(class_name, action_name, captured)
     ActiveSupport.run_load_hooks(:action_controller, stub)
-    fire_around_action(stub, action_name, action, captured.first)
+    fire_around_action(stub, action_name, action, captured[hook_index])
+  end
+
+  def with_frame_context_action(class_name, action_name, &action)
+    with_action_hook(class_name, action_name, hook_index: 0, &action)
   end
 
   def with_request_context_action(class_name, action_name, &action)
-    captured = []
-    stub     = build_stub_controller_class(class_name, action_name, captured)
-    ActiveSupport.run_load_hooks(:action_controller, stub)
-    fire_around_action(stub, action_name, action, captured[1])
+    with_action_hook(class_name, action_name, hook_index: 1, &action)
   end
 end
