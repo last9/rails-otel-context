@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.3] - 2026-03-31
+
+### Fixed
+- **Raw SQL spans not enriched / not slow-flagged**: Two related issues with `connection.execute`-style queries:
+  1. Slow-query timing was set up after `return unless ctx`, so queries that can't resolve a model name (e.g. `SELECT SLEEP(0.2)`, `SELECT 1`) never got `db.slow: true`. Timing is now set up before the ctx check.
+  2. `parse_sql_context` returned `nil` for SQL whose table can't be resolved to an AR model (unregistered table, no FROM clause). It now returns a partial context with `model_name: "SQL"` so the span formatter can produce `"SQL.Select"` / `"SQL.Update"` for tab-group purposes.
+
+## [0.8.2] - 2026-03-31
+
+### Fixed
+- **`connection.execute` spans not enriched**: `payload[:name]` is `nil` for raw `connection.execute(sql)` calls (Rails passes `nil` as the name argument, not `"SQL"`). The subscriber was returning early on nil, skipping both model-context enrichment and slow-query timing. Now nil name is treated identically to `"SQL"` — `parse_sql_context` runs, `apply_to_span` enriches the live span, and `db.slow` fires if the threshold is exceeded.
+
 ## [0.8.1] - 2026-03-31
 
 ### Fixed

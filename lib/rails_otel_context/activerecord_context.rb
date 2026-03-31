@@ -87,10 +87,16 @@ module RailsOtelContext
 
       def start(_name, id, payload)
         ar_name = payload[:name]
-        return unless ar_name
-        return if ar_name == 'SCHEMA' || ar_name.start_with?('CACHE')
+        return if ar_name == 'SCHEMA' || ar_name&.start_with?('CACHE')
 
-        ctx = if ar_name == 'SQL'
+        # Set up slow-query timing regardless of whether we can map a model name,
+        # so that raw SQL (connection.execute, SELECT SLEEP, etc.) still sets db.slow.
+        if @threshold
+          Thread.current[TIMING_ID_KEY]    = id
+          Thread.current[TIMING_START_KEY] = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        end
+
+        ctx = if ar_name.nil? || ar_name == 'SQL'
                 ActiveRecordContext.parse_sql_context(payload[:sql])
               else
                 ActiveRecordContext.parse_ar_name(ar_name)
@@ -108,11 +114,6 @@ module RailsOtelContext
 
         ctx[:async] = true if payload[:async]
         Thread.current[THREAD_KEY] = ctx
-
-        if @threshold
-          Thread.current[TIMING_ID_KEY]    = id
-          Thread.current[TIMING_START_KEY] = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-        end
 
         # Enrich the current span directly. When OTel instruments via driver-level
         # prepend (Trilogy, PG, Mysql2), the span is created BEFORE this notification
@@ -280,11 +281,14 @@ module RailsOtelContext
                 end
       return nil unless keyword
 
-      table = extract_table_after(sql, keyword)
-      return nil unless table
+      table      = extract_table_after(sql, keyword)
+      model_name = table ? ar_table_model_map[table] : nil
 
-      model_name = ar_table_model_map[table]
-      return nil unless model_name
+      # Fall back to the virtual "SQL" model when the table cannot be resolved
+      # (e.g. SELECT SLEEP(0.2), SELECT 1, raw DDL). This lets the span-name
+      # formatter produce "SQL.Select" / "SQL.Update" for tab-group purposes
+      # instead of leaving the span unnamed.
+      model_name ||= 'SQL'
 
       { model_name: model_name, method_name: verb,
         query_key: "#{model_name}.#{verb}".freeze }

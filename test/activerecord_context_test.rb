@@ -124,7 +124,19 @@ class ActiveRecordContextTest < Minitest::Test
     assert_nil RailsOtelContext::ActiveRecordContext.current
   end
 
-  def test_subscriber_skips_nil_payload_name
+  def test_subscriber_nil_name_with_sql_sets_context
+    # connection.execute fires payload[:name] = nil — treat same as "SQL"
+    with_ar_table_map('users' => 'User') do
+      sub = RailsOtelContext::ActiveRecordContext::Subscriber.new
+      sub.start('sql.active_record', '1', { name: nil, sql: "SELECT COUNT(*) FROM users WHERE role = 'admin'" })
+      ctx = RailsOtelContext::ActiveRecordContext.current
+      assert_equal 'User',   ctx[:model_name]
+      assert_equal 'Select', ctx[:method_name]
+    end
+  end
+
+  def test_subscriber_nil_name_no_sql_skips_context
+    # nil name with nil sql payload → parse_sql_context returns nil → no context set
     sub = RailsOtelContext::ActiveRecordContext::Subscriber.new
     sub.start('sql.active_record', '1', { name: nil })
     assert_nil RailsOtelContext::ActiveRecordContext.current
@@ -724,10 +736,22 @@ class ActiveRecordContextTest < Minitest::Test
     end
   end
 
-  def test_parse_sql_context_returns_nil_for_unknown_table
+  def test_parse_sql_context_falls_back_to_sql_for_unknown_table
+    # Table not in AR model map → falls back to virtual "SQL" model for tab grouping
     with_ar_table_map('users' => 'User') do
-      assert_nil RailsOtelContext::ActiveRecordContext.parse_sql_context('UPDATE `widgets` SET x = 1')
+      ctx = RailsOtelContext::ActiveRecordContext.parse_sql_context('UPDATE `widgets` SET x = 1')
+      assert_equal 'SQL',    ctx[:model_name]
+      assert_equal 'Update', ctx[:method_name]
+      assert_equal 'SQL.Update', ctx[:query_key]
     end
+  end
+
+  def test_parse_sql_context_falls_back_to_sql_for_no_table_clause
+    # SQL with no extractable table (e.g. SELECT SLEEP) → "SQL.Select" grouping
+    ctx = RailsOtelContext::ActiveRecordContext.parse_sql_context('SELECT SLEEP(0.2)')
+    assert_equal 'SQL',    ctx[:model_name]
+    assert_equal 'Select', ctx[:method_name]
+    assert_equal 'SQL.Select', ctx[:query_key]
   end
 
   def test_parse_sql_context_returns_nil_for_nil_sql
@@ -802,14 +826,17 @@ class ActiveRecordContextTest < Minitest::Test
     end
   end
 
-  def test_subscriber_skips_sql_named_span_when_model_not_found
+  def test_subscriber_sql_named_span_falls_back_to_sql_model_when_not_found
+    # Unknown table → falls back to virtual "SQL" model instead of skipping
     with_ar_table_map('users' => 'User') do
       sub = RailsOtelContext::ActiveRecordContext::Subscriber.new
       sub.start('sql.active_record', '1', {
                   name: 'SQL',
                   sql: 'UPDATE `unknown_table` SET x = 1'
                 })
-      assert_nil RailsOtelContext::ActiveRecordContext.current
+      ctx = RailsOtelContext::ActiveRecordContext.current
+      assert_equal 'SQL',    ctx[:model_name]
+      assert_equal 'Update', ctx[:method_name]
     end
   end
 
