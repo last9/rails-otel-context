@@ -5,7 +5,8 @@ module RailsOtelContext
     attr_accessor :redis_source_enabled,
                   :clickhouse_enabled,
                   :span_name_formatter,
-                  :slow_query_threshold_ms
+                  :slow_query_threshold_ms,
+                  :n_plus_one_threshold # nil = disabled (default). Set to e.g. 3 to flag repeating queries.
 
     # Deprecated: rails.controller / rails.action / rails.job are now always set
     # on every span. This option is kept for backwards compatibility and has no effect.
@@ -20,6 +21,7 @@ module RailsOtelContext
       @custom_span_attributes = nil
       @request_context_enabled = false
       @slow_query_threshold_ms = nil
+      @n_plus_one_threshold = nil
     end
 
     # Accepts a callable (lambda/proc) that returns a Hash of string keys to string values.

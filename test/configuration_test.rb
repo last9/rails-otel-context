@@ -70,4 +70,8 @@ class ConfigurationTest < Minitest::Test
     RailsOtelContext.configure { |c| c.span_name_formatter = fn }
     assert_equal fn, RailsOtelContext.configuration.span_name_formatter
   end
+
+  def test_n_plus_one_threshold_defaults_to_nil
+    assert_nil RailsOtelContext.configuration.n_plus_one_threshold
+  end
 end
