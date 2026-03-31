@@ -33,6 +33,7 @@ module RailsOtelContext
     AR_QUERY_COUNT_ATTR  = 'db.query_count'
     AR_ASYNC_ATTR        = 'db.async'
     ORIG_NAME_ATTR       = 'l9.orig.name'
+    GC_SNAPSHOT_KEY      = :__rails_otel_gc_snapshot__
 
     # Exposed so SourceLocation mixin can use it for the stack-walk path.
     attr_reader :app_root
@@ -42,6 +43,7 @@ module RailsOtelContext
       @custom_span_attributes  = config.custom_span_attributes
       @span_name_formatter     = config.span_name_formatter
       @slow_query_threshold_ms = config.slow_query_threshold_ms
+      @track_gc_stats          = config.track_gc_stats
     end
 
     def on_start(span, _parent_context)
@@ -49,9 +51,11 @@ module RailsOtelContext
       apply_request_context(span)
       apply_db_context(span)
       apply_custom_attributes(span) if @custom_span_attributes
+      snapshot_gc(span) if @track_gc_stats
     end
 
     def on_finish(span)
+      apply_gc_delta(span) if @track_gc_stats
       return unless @slow_query_threshold_ms
       return unless span.respond_to?(:attributes) && span.attributes&.key?('db.system')
 
@@ -162,6 +166,35 @@ module RailsOtelContext
       end
     rescue StandardError
       # Never let a user-supplied callback break span processing.
+    end
+
+    def snapshot_gc(span)
+      snapshots = Thread.current[GC_SNAPSHOT_KEY] ||= {}
+      snapshots[span.object_id] = [GC.stat(:count), GC.stat(:major_gc_count)]
+    rescue StandardError
+      nil
+    end
+
+    def apply_gc_delta(span)
+      snapshots = Thread.current[GC_SNAPSHOT_KEY]
+      return unless snapshots
+
+      snapshot = snapshots.delete(span.object_id)
+      return unless snapshot
+
+      count_before, major_before = snapshot
+      count_delta = GC.stat(:count) - count_before
+      major_delta = GC.stat(:major_gc_count) - major_before
+
+      return if count_delta <= 0
+
+      attrs = span.instance_variable_get(:@attributes)
+      return unless attrs.respond_to?(:store)
+
+      attrs.store('ruby.gc.count', count_delta)
+      attrs.store('ruby.gc.major_gc_count', major_delta) if major_delta > 0
+    rescue StandardError
+      nil
     end
   end
 end

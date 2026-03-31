@@ -561,6 +561,91 @@ class CallContextProcessorTest < Minitest::Test
     assert_nil @processor.shutdown
   end
 
+  # ---------------------------------------------------------------------------
+  # GC pressure tracking (track_gc_stats: true)
+  # ---------------------------------------------------------------------------
+
+  def test_gc_stats_disabled_by_default
+    span = FakeSpan.new
+    @processor.on_start(span, nil)
+    GC.start # force a collection
+    @processor.on_finish(span)
+    refute span.attributes.key?('ruby.gc.count')
+    refute span.attributes.key?('ruby.gc.major_gc_count')
+  end
+
+  def test_gc_stats_sets_no_attribute_when_no_gc_occurred
+    with_gc_stats_tracking do
+      span = FakeSpan.new
+      before_count = GC.stat(:count)
+      @processor.on_start(span, nil)
+      # Manually restore the snapshot to simulate no GC happened
+      snapshots = Thread.current[RailsOtelContext::CallContextProcessor::GC_SNAPSHOT_KEY]
+      current_count = GC.stat(:count)
+      snapshots[span.object_id] = [current_count, GC.stat(:major_gc_count)]
+      @processor.on_finish(span)
+      refute span.attributes.key?('ruby.gc.count'), 'should not set gc.count when delta is 0'
+    end
+  end
+
+  def test_gc_stats_sets_count_when_gc_occurred
+    with_gc_stats_tracking do
+      span = FakeSpan.new
+      @processor.on_start(span, nil)
+      # Inject a fake snapshot as if GC ran 3 times between on_start and on_finish
+      snapshots = Thread.current[RailsOtelContext::CallContextProcessor::GC_SNAPSHOT_KEY]
+      current_count = GC.stat(:count)
+      current_major = GC.stat(:major_gc_count)
+      snapshots[span.object_id] = [current_count - 3, current_major]
+      @processor.on_finish(span)
+      assert_equal 3, span.attributes['ruby.gc.count']
+      refute span.attributes.key?('ruby.gc.major_gc_count'), 'should omit major when 0'
+    end
+  end
+
+  def test_gc_stats_sets_major_gc_count_when_major_occurred
+    with_gc_stats_tracking do
+      span = FakeSpan.new
+      @processor.on_start(span, nil)
+      snapshots = Thread.current[RailsOtelContext::CallContextProcessor::GC_SNAPSHOT_KEY]
+      current_count = GC.stat(:count)
+      current_major = GC.stat(:major_gc_count)
+      snapshots[span.object_id] = [current_count - 5, current_major - 2]
+      @processor.on_finish(span)
+      assert_equal 5, span.attributes['ruby.gc.count']
+      assert_equal 2, span.attributes['ruby.gc.major_gc_count']
+    end
+  end
+
+  def test_gc_stats_snapshot_cleaned_up_after_on_finish
+    with_gc_stats_tracking do
+      span = FakeSpan.new
+      @processor.on_start(span, nil)
+      snapshots = Thread.current[RailsOtelContext::CallContextProcessor::GC_SNAPSHOT_KEY]
+      assert snapshots.key?(span.object_id)
+      @processor.on_finish(span)
+      refute snapshots.key?(span.object_id), 'snapshot must be deleted to prevent memory leak'
+    end
+  end
+
+  def test_gc_stats_independent_per_span
+    with_gc_stats_tracking do
+      span1 = FakeSpan.new
+      span2 = FakeSpan.new
+      @processor.on_start(span1, nil)
+      @processor.on_start(span2, nil)
+      snapshots = Thread.current[RailsOtelContext::CallContextProcessor::GC_SNAPSHOT_KEY]
+      # Simulate 2 GC cycles on span1, 1 on span2
+      base = GC.stat(:count)
+      snapshots[span1.object_id] = [base - 2, GC.stat(:major_gc_count)]
+      snapshots[span2.object_id] = [base - 1, GC.stat(:major_gc_count)]
+      @processor.on_finish(span1)
+      @processor.on_finish(span2)
+      assert_equal 2, span1.attributes['ruby.gc.count']
+      assert_equal 1, span2.attributes['ruby.gc.count']
+    end
+  end
+
   private
 
   def new_processor
@@ -585,5 +670,16 @@ class CallContextProcessorTest < Minitest::Test
   ensure
     @processor = orig
     RailsOtelContext.reset_configuration!
+  end
+
+  def with_gc_stats_tracking
+    RailsOtelContext.configure { |c| c.track_gc_stats = true }
+    orig = @processor
+    @processor = RailsOtelContext::CallContextProcessor.new(app_root: @app_root)
+    yield
+  ensure
+    @processor = orig
+    RailsOtelContext.reset_configuration!
+    Thread.current[RailsOtelContext::CallContextProcessor::GC_SNAPSHOT_KEY] = nil
   end
 end
