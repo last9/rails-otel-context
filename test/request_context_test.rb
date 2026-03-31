@@ -50,6 +50,28 @@ class RequestContextTest < Minitest::Test
     assert_nil Thread.current[RailsOtelContext::RequestContext::QUERY_COUNT_KEY]
   end
 
+  def test_set_job_stores_queue_latency_ms
+    RailsOtelContext::RequestContext.set_job(job_class: 'InvoiceJob', queue_latency_ms: 42.5)
+    assert_equal 42.5, RailsOtelContext::RequestContext.queue_latency_ms
+  end
+
+  def test_set_job_without_latency_defaults_nil
+    RailsOtelContext::RequestContext.set_job(job_class: 'InvoiceJob')
+    assert_nil RailsOtelContext::RequestContext.queue_latency_ms
+  end
+
+  def test_clear_job_clears_queue_latency
+    RailsOtelContext::RequestContext.set_job(job_class: 'InvoiceJob', queue_latency_ms: 99.0)
+    RailsOtelContext::RequestContext.clear_job!
+    assert_nil RailsOtelContext::RequestContext.queue_latency_ms
+  end
+
+  def test_clear_also_clears_queue_latency
+    RailsOtelContext::RequestContext.set_job(job_class: 'InvoiceJob', queue_latency_ms: 10.0)
+    RailsOtelContext::RequestContext.clear!
+    assert_nil RailsOtelContext::RequestContext.queue_latency_ms
+  end
+
   def test_clear_job_clears_job_and_query_count
     RailsOtelContext::RequestContext.set_job(job_class: 'NotifyJob')
     Thread.current[RailsOtelContext::RequestContext::QUERY_COUNT_KEY] = { 'User.Load' => 1 }

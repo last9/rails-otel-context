@@ -553,6 +553,26 @@ class CallContextProcessorTest < Minitest::Test
     end
   end
 
+  def test_job_queue_latency_set_on_span_when_present
+    RailsOtelContext::RequestContext.set_job(job_class: 'InvoiceJob', queue_latency_ms: 350.5)
+    span = FakeSpan.new
+    @processor.on_start(span, nil)
+    assert_equal 'InvoiceJob', span.attributes['rails.job']
+    assert_equal 350.5, span.attributes['rails.job.queue_latency_ms']
+  ensure
+    RailsOtelContext::RequestContext.clear!
+  end
+
+  def test_job_queue_latency_absent_when_nil
+    RailsOtelContext::RequestContext.set_job(job_class: 'InvoiceJob')
+    span = FakeSpan.new
+    @processor.on_start(span, nil)
+    assert_equal 'InvoiceJob', span.attributes['rails.job']
+    refute span.attributes.key?('rails.job.queue_latency_ms')
+  ensure
+    RailsOtelContext::RequestContext.clear!
+  end
+
   def test_force_flush_is_a_noop
     assert_nil @processor.force_flush
   end
