@@ -276,6 +276,7 @@ class ActiveRecordContextTest < Minitest::Test
 
     span = FakeSpan.new(valid_context: true)
     span.name = 'trilogy.query'
+    span.set_attribute('db.system', 'mysql2')
     ctx = { model_name: 'User', method_name: 'Load' }
     RailsOtelContext::ActiveRecordContext.apply_to_span(span, ctx)
 
@@ -291,7 +292,8 @@ class ActiveRecordContextTest < Minitest::Test
     end
 
     span = FakeSpan.new(valid_context: true)
-    span.attributes['code.namespace'] = 'OrdersController'
+    span.set_attribute('db.system', 'mysql2')
+    span.set_attribute('code.namespace', 'OrdersController')
     ctx = { model_name: 'Order', method_name: 'Load' }
     RailsOtelContext::ActiveRecordContext.apply_to_span(span, ctx)
 
@@ -766,6 +768,7 @@ class ActiveRecordContextTest < Minitest::Test
     with_ar_table_map('posts' => 'Post') do
       with_current_span(FakeSpan.new(valid_context: true)) do |span|
         span.name = 'trilogy.query'
+        span.set_attribute('db.system', 'mysql2')
         sub = RailsOtelContext::ActiveRecordContext::Subscriber.new
         sub.start('sql.active_record', '1', { name: 'SQL', sql: 'UPDATE `posts` SET views = 1' })
         assert_equal 'Post.Update', span.name

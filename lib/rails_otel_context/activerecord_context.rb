@@ -201,6 +201,7 @@ module RailsOtelContext
 
       formatter = RailsOtelContext.configuration.span_name_formatter
       return unless formatter
+      return unless span.respond_to?(:attributes) && span.attributes&.key?('db.system')
 
       # Dup deferred to here: set_attribute calls above need only the original ctx keys.
       # The formatter may inspect code.namespace/code.function already on the span.

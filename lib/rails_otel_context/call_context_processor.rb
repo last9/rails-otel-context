@@ -143,6 +143,7 @@ module RailsOtelContext
 
     def apply_span_name_formatter(span, ar_context)
       return unless @span_name_formatter
+      return unless span.respond_to?(:attributes) && span.attributes&.key?('db.system')
 
       original_name = span.name
       new_name = @span_name_formatter.call(original_name, ar_context)

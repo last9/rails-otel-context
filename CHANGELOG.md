@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.4] - 2026-03-31
+
+### Fixed
+- **`span_name_formatter` renaming HTTP/controller spans**: The formatter was called on any span when `ActiveRecordContext.current` was non-nil — including the HTTP root span when an AR context happened to be active on the thread. Added a `db.system` attribute guard to both `CallContextProcessor#apply_span_name_formatter` and `ActiveRecordContext#apply_to_span` so the formatter only fires on actual DB spans (Trilogy, PG, MySQL2, ClickHouse — all of which carry `db.system`).
+
 ## [0.9.3] - 2026-03-31
 
 ### Fixed

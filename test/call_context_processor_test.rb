@@ -410,6 +410,7 @@ class CallContextProcessorTest < Minitest::Test
     proc = new_processor
 
     span = FakeSpan.new
+    span.set_attribute('db.system', 'mysql2')
     span.define_singleton_method(:name) { @custom_name || 'select' }
     span.define_singleton_method(:name=) { |n| @custom_name = n }
 
@@ -434,6 +435,7 @@ class CallContextProcessorTest < Minitest::Test
     proc = new_processor
 
     span = FakeSpan.new
+    span.set_attribute('db.system', 'mysql2')
     span.define_singleton_method(:name) { 'select' }
     span.define_singleton_method(:name=) { |n| @custom_name = n }
 
@@ -441,6 +443,23 @@ class CallContextProcessorTest < Minitest::Test
 
     assert_equal 'recent_completed', received_ctx[:scope_name]
     assert_equal 'Transaction', received_ctx[:model_name]
+  ensure
+    RailsOtelContext::ActiveRecordContext.clear!
+  end
+
+  def test_db_context_formatter_skips_non_db_spans
+    RailsOtelContext::ActiveRecordContext.stub_context({ model_name: 'User', method_name: 'Load' })
+    RailsOtelContext.configure do |c|
+      c.span_name_formatter = ->(_orig, ctx) { "#{ctx[:model_name]}.#{ctx[:method_name]}" }
+    end
+    proc = new_processor
+
+    # HTTP/controller span — no db.system attribute
+    span = FakeSpan.new
+    span.name = 'GET /users'
+    proc.on_start(span, nil)
+    assert_equal 'GET /users', span.name, 'formatter must not rename non-DB spans'
+    assert_nil span.attributes['l9.orig.name']
   ensure
     RailsOtelContext::ActiveRecordContext.clear!
   end
