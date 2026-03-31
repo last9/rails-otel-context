@@ -36,8 +36,13 @@ module RailsOtelContext
     # child spans via RequestContext. Also resets the N+1 query counter at both
     # the start and end of every request to prevent bleed across Puma thread reuse.
     # Always-on — no config gate.
+    #
+    # Both hooks are required: ActionController::Base fires :action_controller,
+    # ActionController::API (Rails API-only apps) fires :action_controller_api.
+    # In Rails 8 API-only apps :action_controller never fires, so without the
+    # second hook rails.controller / rails.action would be absent from every span.
     initializer 'rails_otel_context.install_request_context' do
-      ActiveSupport.on_load(:action_controller) do
+      around_action_hook = proc do
         around_action do |_controller, block|
           RailsOtelContext::RequestContext.set(
             controller: self.class.name,
@@ -48,6 +53,8 @@ module RailsOtelContext
           RailsOtelContext::RequestContext.clear!
         end
       end
+      ActiveSupport.on_load(:action_controller, &around_action_hook)
+      ActiveSupport.on_load(:action_controller_api, &around_action_hook)
     end
 
     # Capture job class name for every ActiveJob execution and propagate it to all

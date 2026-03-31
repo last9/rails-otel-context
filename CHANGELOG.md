@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.3] - 2026-03-31
+
+### Fixed
+- **Gem never loaded when added to Gemfile without explicit `require:`**: Bundler's auto-require converts the gem name `rails-otel-context` to `rails/otel/context` (hyphens → slashes). The file `lib/rails/otel/context.rb` was missing, so `Bundler.require` silently failed and the Railtie never registered — no instrumentation at all. Added `lib/rails/otel/context.rb` as a shim that requires `rails_otel_context`, fixing zero-config installation.
+
+## [0.9.2] - 2026-03-31
+
+### Fixed
+- **`rails.controller` / `rails.action` missing in Rails 8 API-only apps**: `install_request_context` was only hooking `on_load(:action_controller)`, which fires for `ActionController::Base` subclasses only. `ActionController::API` (the default in `rails new --api` and Rails 8 API-only apps) fires `on_load(:action_controller_api)` instead. Added a second `on_load(:action_controller_api)` hook with the same `around_action` block so `rails.controller` and `rails.action` appear on every span in API-only apps.
+
 ## [0.9.1] - 2026-03-31
 
 ### Fixed
