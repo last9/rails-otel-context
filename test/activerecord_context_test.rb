@@ -142,30 +142,13 @@ class ActiveRecordContextTest < Minitest::Test
     assert_nil RailsOtelContext::ActiveRecordContext.current
   end
 
-  def test_subscriber_finish_clears_thread_key_even_without_timing
+  def test_subscriber_finish_clears_thread_key
     sub = RailsOtelContext::ActiveRecordContext::Subscriber.new
     sub.start('sql.active_record', '1', { name: 'User Load' })
     assert_equal 'User', RailsOtelContext::ActiveRecordContext.current[:model_name]
 
-    # finish with a different id — timing entry mismatch, but THREAD_KEY must still clear
-    sub.finish('sql.active_record', 'other-id', {})
+    sub.finish('sql.active_record', '1', {})
     assert_nil RailsOtelContext::ActiveRecordContext.current
-  end
-
-  def test_subscriber_finish_no_db_slow_on_timing_id_mismatch
-    with_slow_query_threshold(50) do
-      with_current_span(FakeSpan.new(valid_context: true)) do |span|
-        sub = RailsOtelContext::ActiveRecordContext::Subscriber.new
-        call_count = 0
-        with_stubbed_clock(-> { (call_count += 1) == 1 ? 0.0 : 1.0 }) do
-          sub.start('sql.active_record', 'event-A', { name: 'User Load' })
-          # finish with wrong id — timing stored for 'event-A' but we send 'event-B'
-          sub.finish('sql.active_record', 'event-B', {})
-        end
-        refute span.attributes.key?('db.slow'),
-               'mismatched id should not set db.slow'
-      end
-    end
   end
 
   # Scope tracking via thread-local
@@ -626,72 +609,6 @@ class ActiveRecordContextTest < Minitest::Test
 
   # Slow query detection
 
-  def test_slow_query_sets_db_slow_on_span
-    with_slow_query_threshold(100) do
-      with_current_span(FakeSpan.new(valid_context: true)) do |span|
-        sub = RailsOtelContext::ActiveRecordContext::Subscriber.new
-        call_count = 0
-        with_stubbed_clock(-> { (call_count += 1) == 1 ? 0.0 : 0.2 }) do
-          sub.start('sql.active_record', 'event-1', { name: 'User Load' })
-          sub.finish('sql.active_record', 'event-1', {})
-        end
-        assert span.attributes['db.slow']
-      end
-    end
-  end
-
-  def test_slow_query_does_not_set_db_slow_when_fast
-    with_slow_query_threshold(100) do
-      with_current_span(FakeSpan.new(valid_context: true)) do |span|
-        sub = RailsOtelContext::ActiveRecordContext::Subscriber.new
-        call_count = 0
-        with_stubbed_clock(-> { (call_count += 1) == 1 ? 0.0 : 0.05 }) do # 50ms — under threshold
-          sub.start('sql.active_record', 'event-2', { name: 'User Load' })
-          sub.finish('sql.active_record', 'event-2', {})
-        end
-        refute span.attributes.key?('db.slow')
-      end
-    end
-  end
-
-  def test_slow_query_skipped_when_threshold_not_configured
-    with_current_span(FakeSpan.new(valid_context: true)) do |span|
-      sub = RailsOtelContext::ActiveRecordContext::Subscriber.new
-      sub.start('sql.active_record', 'event-3', { name: 'User Load' })
-      sub.finish('sql.active_record', 'event-3', {})
-
-      refute span.attributes.key?('db.slow')
-    end
-  end
-
-  def test_slow_query_at_exact_threshold_sets_db_slow
-    # elapsed_ms >= threshold, not >
-    with_slow_query_threshold(100) do
-      with_current_span(FakeSpan.new(valid_context: true)) do |span|
-        sub = RailsOtelContext::ActiveRecordContext::Subscriber.new
-        call_count = 0
-        with_stubbed_clock(-> { (call_count += 1) == 1 ? 0.0 : 0.1 }) do # exactly 100ms
-          sub.start('sql.active_record', 'event-4', { name: 'User Load' })
-          sub.finish('sql.active_record', 'event-4', {})
-        end
-        assert span.attributes['db.slow'], 'query at exact threshold should be flagged'
-      end
-    end
-  end
-
-  def test_slow_query_no_db_slow_when_span_context_invalid
-    with_slow_query_threshold(100) do
-      with_current_span(FakeSpan.new(valid_context: false)) do |span|
-        sub = RailsOtelContext::ActiveRecordContext::Subscriber.new
-        call_count = 0
-        with_stubbed_clock(-> { (call_count += 1) == 1 ? 0.0 : 0.5 }) do
-          sub.start('sql.active_record', 'event-5', { name: 'User Load' })
-          sub.finish('sql.active_record', 'event-5', {})
-        end
-        refute span.attributes.key?('db.slow')
-      end
-    end
-  end
 
   # parse_sql_context — SQL table-name parsing for name="SQL" notifications
   # (counter caches, touch_later, connection.execute)
@@ -859,14 +776,6 @@ class ActiveRecordContextTest < Minitest::Test
   end
 
   private
-
-  def with_slow_query_threshold(threshold_ms)
-    RailsOtelContext.configure { |c| c.slow_query_threshold_ms = threshold_ms }
-    yield
-  ensure
-    RailsOtelContext.reset_configuration!
-    RailsOtelContext::ActiveRecordContext.clear!
-  end
 
   def with_ar_table_map(map)
     RailsOtelContext::ActiveRecordContext.instance_variable_set(:@ar_table_model_map, map)

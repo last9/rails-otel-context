@@ -41,10 +41,17 @@ module RailsOtelContext
     initializer 'rails_otel_context.install_frame_context' do
       ActiveSupport.on_load(:action_controller) do
         around_action do |_controller, block|
+          # Reset N+1 query counter at the start of every request so counts
+          # never bleed across requests on Puma's reused threads. This runs
+          # regardless of request_context_enabled, which only gates whether
+          # RequestContext.set is called (and would reset it there too).
+          Thread.current[RailsOtelContext::RequestContext::QUERY_COUNT_KEY] = nil
           RailsOtelContext::FrameContext.with_frame(
             class_name: self.class.name,
             method_name: action_name
           ) { block.call }
+        ensure
+          Thread.current[RailsOtelContext::RequestContext::QUERY_COUNT_KEY] = nil
         end
       end
     end

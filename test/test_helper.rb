@@ -22,12 +22,14 @@ end
 
 class FakeSpan
   attr_reader :attributes, :context
-  attr_accessor :name
+  attr_accessor :name, :start_timestamp, :end_timestamp
 
-  def initialize(valid_context: true)
-    @attributes = {}
-    @name = 'SELECT'
-    @context = FakeSpanContext.new(valid_context)
+  def initialize(valid_context: true, start_timestamp: nil, end_timestamp: nil)
+    @attributes      = {}
+    @name            = 'SELECT'
+    @context         = FakeSpanContext.new(valid_context)
+    @start_timestamp = start_timestamp
+    @end_timestamp   = end_timestamp
   end
 
   def set_attribute(key, value)

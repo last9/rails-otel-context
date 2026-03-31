@@ -481,11 +481,57 @@ class CallContextProcessorTest < Minitest::Test
   end
 
   # ---------------------------------------------------------------------------
-  # no-op lifecycle methods
+  # on_finish — db.slow detection
   # ---------------------------------------------------------------------------
 
-  def test_on_finish_is_a_noop
-    assert_nil @processor.on_finish(FakeSpan.new)
+  def test_on_finish_noop_without_threshold
+    # No slow_query_threshold_ms configured → never sets db.slow
+    span = db_span(start_ns: 0, end_ns: 500_000_000) # 500ms
+    @processor.on_finish(span)
+    refute span.attributes.key?('db.slow')
+  end
+
+  def test_on_finish_sets_db_slow_on_slow_db_span
+    with_slow_query_threshold(100) do
+      span = db_span(start_ns: 0, end_ns: 200_000_000) # 200ms > 100ms
+      @processor.on_finish(span)
+      assert span.attributes['db.slow'], 'slow DB span should be flagged'
+    end
+  end
+
+  def test_on_finish_no_db_slow_for_fast_span
+    with_slow_query_threshold(100) do
+      span = db_span(start_ns: 0, end_ns: 50_000_000) # 50ms < 100ms
+      @processor.on_finish(span)
+      refute span.attributes.key?('db.slow')
+    end
+  end
+
+  def test_on_finish_db_slow_at_exact_threshold
+    with_slow_query_threshold(100) do
+      span = db_span(start_ns: 0, end_ns: 100_000_000) # exactly 100ms
+      @processor.on_finish(span)
+      assert span.attributes['db.slow'], 'query at exact threshold should be flagged'
+    end
+  end
+
+  def test_on_finish_skips_non_db_spans
+    with_slow_query_threshold(10) do
+      span = FakeSpan.new(start_timestamp: 0, end_timestamp: 500_000_000)
+      # no db.system attribute → not a DB span
+      @processor.on_finish(span)
+      refute span.attributes.key?('db.slow')
+    end
+  end
+
+  def test_on_finish_skips_span_without_timestamps
+    with_slow_query_threshold(10) do
+      span = FakeSpan.new
+      span.set_attribute('db.system', 'mysql')
+      # no start/end timestamps
+      @processor.on_finish(span)
+      refute span.attributes.key?('db.slow')
+    end
   end
 
   def test_force_flush_is_a_noop
@@ -500,5 +546,24 @@ class CallContextProcessorTest < Minitest::Test
 
   def new_processor
     RailsOtelContext::CallContextProcessor.new(app_root: @app_root)
+  end
+
+  # Build a FakeSpan that looks like a DB span (has db.system) with timestamps.
+  # start_ns / end_ns are in nanoseconds (same unit as OTel span timestamps).
+  def db_span(start_ns:, end_ns:)
+    span = FakeSpan.new(start_timestamp: start_ns, end_timestamp: end_ns)
+    span.set_attribute('db.system', 'mysql')
+    span
+  end
+
+  def with_slow_query_threshold(threshold_ms)
+    RailsOtelContext.configure { |c| c.slow_query_threshold_ms = threshold_ms }
+    processor = RailsOtelContext::CallContextProcessor.new(app_root: @app_root)
+    # Swap @processor so on_finish tests use the newly configured instance
+    orig, @processor = @processor, processor
+    yield
+  ensure
+    @processor = orig
+    RailsOtelContext.reset_configuration!
   end
 end

@@ -13,12 +13,10 @@ module RailsOtelContext
   #    Transaction.recent_completed.to_a where the scope method returns before
   #    SQL fires.
   module ActiveRecordContext
-    THREAD_KEY        = :_rails_otel_ctx_ar
-    SCOPE_THREAD_KEY  = :_rails_otel_ctx_scope
-    TIMING_ID_KEY     = :_rails_otel_ctx_timing_id
-    TIMING_START_KEY  = :_rails_otel_ctx_timing_start
-    DB_SLOW_ATTR      = 'db.slow'
-    private_constant :THREAD_KEY, :SCOPE_THREAD_KEY, :TIMING_ID_KEY, :TIMING_START_KEY
+    THREAD_KEY       = :_rails_otel_ctx_ar
+    SCOPE_THREAD_KEY = :_rails_otel_ctx_scope
+    DB_SLOW_ATTR     = 'db.slow'
+    private_constant :THREAD_KEY, :SCOPE_THREAD_KEY
 
     # Frozen regex — only the verb regex remains; table extraction uses index+slice.
     SQL_VERB_RE = /\A(\w+)/i
@@ -81,20 +79,9 @@ module RailsOtelContext
 
     # Subscriber for sql.active_record notifications.
     class Subscriber
-      def initialize
-        @threshold = RailsOtelContext.configuration.slow_query_threshold_ms
-      end
-
-      def start(_name, id, payload)
+      def start(_name, _id, payload)
         ar_name = payload[:name]
         return if ar_name == 'SCHEMA' || ar_name&.start_with?('CACHE')
-
-        # Set up slow-query timing regardless of whether we can map a model name,
-        # so that raw SQL (connection.execute, SELECT SLEEP, etc.) still sets db.slow.
-        if @threshold
-          Thread.current[TIMING_ID_KEY]    = id
-          Thread.current[TIMING_START_KEY] = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-        end
 
         ctx = if ar_name.nil? || ar_name == 'SQL'
                 ActiveRecordContext.parse_sql_context(payload[:sql])
@@ -124,15 +111,7 @@ module RailsOtelContext
         ActiveRecordContext.apply_to_span(OpenTelemetry::Trace.current_span, ctx)
       end
 
-      def finish(_name, id, _payload)
-        if @threshold && Thread.current[TIMING_ID_KEY].equal?(id)
-          elapsed_ms = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - Thread.current[TIMING_START_KEY]) * 1000
-          Thread.current[TIMING_ID_KEY] = nil
-          if elapsed_ms >= @threshold
-            span = OpenTelemetry::Trace.current_span
-            span.set_attribute(DB_SLOW_ATTR, true) if span.context.valid?
-          end
-        end
+      def finish(_name, _id, _payload)
       ensure
         Thread.current[THREAD_KEY] = nil
       end
@@ -196,8 +175,6 @@ module RailsOtelContext
     def clear!
       Thread.current[THREAD_KEY]       = nil
       Thread.current[SCOPE_THREAD_KEY] = nil
-      Thread.current[TIMING_ID_KEY]    = nil
-      Thread.current[TIMING_START_KEY] = nil
     end
 
     # Test helpers: set AR context directly for unit tests.

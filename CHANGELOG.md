@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.4] - 2026-03-31
+
+### Fixed
+- **N+1 counter stale across requests** (bug when `request_context_enabled: false`, the default): `db.query_count` was never reset between requests on reused Puma threads, causing inflated counts on every request after the first. `install_frame_context`'s `around_action` (always installed, no config gate) now resets `QUERY_COUNT_KEY` at request start and in its `ensure` block.
+- **`db.slow` on wrong span**: `Subscriber#finish` fired after the OTel Trilogy span had already ended, so `current_span` was the HTTP parent — `db.slow` landed there instead of on the slow DB span. Removed timing from `Subscriber` entirely; moved slow-query detection to `CallContextProcessor#on_finish`, which receives the actual DB span and uses `end_timestamp - start_timestamp` for duration. `db.slow: true` is now set directly on the DB span via its internal attributes store (span is non-recording at that point but the backing hash is still mutable before export).
+
 ## [0.8.3] - 2026-03-31
 
 ### Fixed

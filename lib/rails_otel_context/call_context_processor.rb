@@ -39,9 +39,10 @@ module RailsOtelContext
 
     def initialize(app_root:, config: RailsOtelContext.configuration)
       @app_root = app_root.to_s
-      @request_context_enabled = config.request_context_enabled
-      @custom_span_attributes = config.custom_span_attributes
-      @span_name_formatter = config.span_name_formatter
+      @request_context_enabled     = config.request_context_enabled
+      @custom_span_attributes      = config.custom_span_attributes
+      @span_name_formatter         = config.span_name_formatter
+      @slow_query_threshold_ms     = config.slow_query_threshold_ms
     end
 
     def on_start(span, _parent_context)
@@ -51,7 +52,25 @@ module RailsOtelContext
       apply_custom_attributes(span) if @custom_span_attributes
     end
 
-    def on_finish(_span); end
+    def on_finish(span)
+      return unless @slow_query_threshold_ms
+      return unless span.respond_to?(:attributes) && span.attributes&.key?('db.system')
+
+      start_ns = span.start_timestamp
+      end_ns   = span.end_timestamp
+      return unless start_ns && end_ns
+
+      duration_ms = (end_ns - start_ns) / 1_000_000.0
+      return unless duration_ms >= @slow_query_threshold_ms
+
+      # span.recording? is false here — the span has finished and current_span
+      # has reverted to the HTTP parent. Write directly to the backing attributes
+      # hash so db.slow lands on the actual DB span, not the HTTP parent.
+      attrs = span.instance_variable_get(:@attributes)
+      attrs.store(ActiveRecordContext::DB_SLOW_ATTR, true) if attrs.respond_to?(:store)
+    rescue StandardError
+      nil
+    end
 
     def force_flush(timeout: nil); end
 
