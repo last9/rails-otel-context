@@ -4,6 +4,7 @@ require_relative 'test_helper'
 require 'ostruct'
 
 class ClickhouseAdapterTest < Minitest::Test
+  include CallerLocationHelpers
   include SpanHelpers
 
   def setup
@@ -22,7 +23,7 @@ class ClickhouseAdapterTest < Minitest::Test
     end
     client_class.prepend(patch)
 
-    with_thread_source('/app/services/warehouse.rb', 14) do
+    with_thread_source('/app/services/warehouse.rb', 14, label: 'WarehouseService#load') do
       with_tracer_spy do |calls|
         result = client_class.new.query('SELECT 1')
         assert_equal :ok, result
@@ -33,8 +34,10 @@ class ClickhouseAdapterTest < Minitest::Test
         assert_equal 'clickhouse', span[:attributes]['db.system']
         assert_equal 'QUERY', span[:attributes]['db.operation']
         assert_equal 'SELECT 1', span[:attributes]['db.statement']
-        assert_equal 'app/services/warehouse.rb', span[:attributes]['code.filepath']
-        assert_equal 14, span[:attributes]['code.lineno']
+        assert_equal 'WarehouseService',            span[:attributes]['code.namespace']
+        assert_equal 'load',                         span[:attributes]['code.function']
+        assert_equal 'app/services/warehouse.rb',    span[:attributes]['code.filepath']
+        assert_equal 14,                             span[:attributes]['code.lineno']
       end
     end
   end
@@ -59,30 +62,6 @@ class ClickhouseAdapterTest < Minitest::Test
   end
 
   private
-
-  def with_thread_source(path, lineno)
-    thread_singleton = Thread.singleton_class
-    location = OpenStruct.new(absolute_path: File.join(Dir.pwd, path), path: nil, lineno: lineno)
-    had_original = Thread.respond_to?(:each_caller_location)
-
-    if had_original
-      thread_singleton.class_eval do
-        alias_method :__rails_otel_context_original_each_caller_location, :each_caller_location
-      end
-    end
-    thread_singleton.define_method(:each_caller_location) { |&block| block.call(location) }
-
-    yield
-  ensure
-    if had_original
-      thread_singleton.class_eval do
-        alias_method :each_caller_location, :__rails_otel_context_original_each_caller_location
-        remove_method :__rails_otel_context_original_each_caller_location
-      end
-    else
-      thread_singleton.class_eval { remove_method :each_caller_location }
-    end
-  end
 
   def with_tracer_spy
     calls = []

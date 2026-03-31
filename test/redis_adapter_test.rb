@@ -4,6 +4,8 @@ require_relative 'test_helper'
 require 'ostruct'
 
 class RedisAdapterTest < Minitest::Test
+  include CallerLocationHelpers
+
   def setup
     RailsOtelContext::Adapters::Redis.instance_variable_set(:@patch_module, nil)
   end
@@ -16,13 +18,15 @@ class RedisAdapterTest < Minitest::Test
     middleware_class.prepend(patch)
     middleware = middleware_class.new
 
-    with_thread_source('/app/services/cache_service.rb', 21) do
+    with_thread_source('/app/services/cache_service.rb', 21, label: 'CacheService#fetch') do
       with_redis_with_attributes_spy do |calls|
         result = middleware.call(['GET', 'k'], Object.new) { :ok }
         assert_equal :ok, result
         assert_equal 1, calls.size
-        assert_equal 'app/services/cache_service.rb', calls[0]['code.filepath']
-        assert_equal 21, calls[0]['code.lineno']
+        assert_equal 'CacheService',                   calls[0]['code.namespace']
+        assert_equal 'fetch',                           calls[0]['code.function']
+        assert_equal 'app/services/cache_service.rb',  calls[0]['code.filepath']
+        assert_equal 21,                                calls[0]['code.lineno']
       end
     end
   end
@@ -35,13 +39,15 @@ class RedisAdapterTest < Minitest::Test
     middleware_class.prepend(patch)
     middleware = middleware_class.new
 
-    with_thread_source('/app/services/cache_service.rb', 42) do
+    with_thread_source('/app/services/cache_service.rb', 42, label: 'CacheService#warm') do
       with_redis_with_attributes_spy do |calls|
         result = middleware.call_pipelined([['SET', 'a', '1']], Object.new) { :ok }
         assert_equal :ok, result
         assert_equal 1, calls.size
-        assert_equal 'app/services/cache_service.rb', calls[0]['code.filepath']
-        assert_equal 42, calls[0]['code.lineno']
+        assert_equal 'CacheService',                   calls[0]['code.namespace']
+        assert_equal 'warm',                            calls[0]['code.function']
+        assert_equal 'app/services/cache_service.rb',  calls[0]['code.filepath']
+        assert_equal 42,                                calls[0]['code.lineno']
       end
     end
   end
@@ -72,31 +78,6 @@ class RedisAdapterTest < Minitest::Test
       def call_pipelined(commands, _config)
         block_given? ? yield(commands) : :ok
       end
-    end
-  end
-
-  def with_thread_source(path, lineno)
-    thread_singleton = Thread.singleton_class
-    location = OpenStruct.new(absolute_path: File.join(Dir.pwd, path), path: nil, lineno: lineno)
-    had_original = Thread.respond_to?(:each_caller_location)
-
-    if had_original
-      thread_singleton.class_eval do
-        alias_method :__rails_otel_context_original_each_caller_location, :each_caller_location
-      end
-    end
-
-    thread_singleton.define_method(:each_caller_location) { |&block| block.call(location) }
-
-    yield
-  ensure
-    if had_original
-      thread_singleton.class_eval do
-        alias_method :each_caller_location, :__rails_otel_context_original_each_caller_location
-        remove_method :__rails_otel_context_original_each_caller_location
-      end
-    else
-      thread_singleton.class_eval { remove_method :each_caller_location }
     end
   end
 
