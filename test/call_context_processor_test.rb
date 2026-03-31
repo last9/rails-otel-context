@@ -561,6 +561,75 @@ class CallContextProcessorTest < Minitest::Test
     assert_nil @processor.shutdown
   end
 
+  # ---------------------------------------------------------------------------
+  # Allocation count tracking (track_allocations: true)
+  # ---------------------------------------------------------------------------
+
+  def test_allocations_disabled_by_default
+    span = FakeSpan.new
+    @processor.on_start(span, nil)
+    @processor.on_finish(span)
+    refute span.attributes.key?('ruby.allocations')
+  end
+
+  def test_allocations_not_set_when_delta_is_non_positive
+    with_allocation_tracking do
+      span = FakeSpan.new
+      @processor.on_start(span, nil)
+      # Inject a snapshot HIGHER than the current count to simulate a non-positive
+      # delta — this exercises the positive? guard without racing against Ruby allocations.
+      snapshots = Thread.current[RailsOtelContext::CallContextProcessor::ALLOC_SNAPSHOT_KEY]
+      snapshots[span] = GC.stat(:total_allocated_objects) + 1_000_000
+      @processor.on_finish(span)
+      refute span.attributes.key?('ruby.allocations'), 'should not set when delta is not positive'
+    end
+  end
+
+  def test_allocations_set_when_objects_were_allocated
+    with_allocation_tracking do
+      span = FakeSpan.new
+      @processor.on_start(span, nil)
+      # Inject snapshot simulating at least 100 allocations occurred.
+      # Use >= because on_finish itself allocates a few objects.
+      snapshots = Thread.current[RailsOtelContext::CallContextProcessor::ALLOC_SNAPSHOT_KEY]
+      snapshots[span] = GC.stat(:total_allocated_objects) - 100
+      @processor.on_finish(span)
+      assert_operator span.attributes['ruby.allocations'], :>=, 100
+    end
+  end
+
+  def test_allocation_snapshot_cleaned_up_after_on_finish
+    with_allocation_tracking do
+      span = FakeSpan.new
+      @processor.on_start(span, nil)
+      snapshots = Thread.current[RailsOtelContext::CallContextProcessor::ALLOC_SNAPSHOT_KEY]
+      assert snapshots.key?(span)
+      @processor.on_finish(span)
+      refute snapshots.key?(span), 'snapshot must be deleted to prevent memory leak'
+    end
+  end
+
+  def test_allocations_independent_per_span
+    with_allocation_tracking do
+      span1 = FakeSpan.new
+      span2 = FakeSpan.new
+      @processor.on_start(span1, nil)
+      @processor.on_start(span2, nil)
+      snapshots = Thread.current[RailsOtelContext::CallContextProcessor::ALLOC_SNAPSHOT_KEY]
+      base = GC.stat(:total_allocated_objects)
+      # Simulate span1 saw 30 more allocations than span2 before this point
+      snapshots[span1] = base - 50
+      snapshots[span2] = base - 20
+      @processor.on_finish(span1)
+      @processor.on_finish(span2)
+      # Both deltas include a few allocations from on_finish itself, so use >= and
+      # verify span1 > span2 (30 extra allocations are preserved in the delta)
+      assert_operator span1.attributes['ruby.allocations'], :>=, 50
+      assert_operator span2.attributes['ruby.allocations'], :>=, 20
+      assert_operator span1.attributes['ruby.allocations'], :>, span2.attributes['ruby.allocations']
+    end
+  end
+
   private
 
   def new_processor
@@ -585,5 +654,16 @@ class CallContextProcessorTest < Minitest::Test
   ensure
     @processor = orig
     RailsOtelContext.reset_configuration!
+  end
+
+  def with_allocation_tracking
+    RailsOtelContext.configure { |c| c.track_allocations = true }
+    orig = @processor
+    @processor = RailsOtelContext::CallContextProcessor.new(app_root: @app_root)
+    yield
+  ensure
+    @processor = orig
+    RailsOtelContext.reset_configuration!
+    Thread.current[RailsOtelContext::CallContextProcessor::ALLOC_SNAPSHOT_KEY] = nil
   end
 end
