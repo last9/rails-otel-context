@@ -56,23 +56,7 @@ module RailsOtelContext
 
     def on_finish(span)
       apply_gc_delta(span) if @track_gc_stats
-      return unless @slow_query_threshold_ms
-      return unless span.respond_to?(:attributes) && span.attributes&.key?('db.system')
-
-      start_ns = span.start_timestamp
-      end_ns   = span.end_timestamp
-      return unless start_ns && end_ns
-
-      duration_ms = (end_ns - start_ns) / 1_000_000.0
-      return unless duration_ms >= @slow_query_threshold_ms
-
-      # span.recording? is false here — the span has finished and current_span
-      # has reverted to the HTTP parent. Write directly to the backing attributes
-      # hash so db.slow lands on the actual DB span, not the HTTP parent.
-      attrs = span.instance_variable_get(:@attributes)
-      attrs.store(ActiveRecordContext::DB_SLOW_ATTR, true) if attrs.respond_to?(:store)
-    rescue StandardError
-      nil
+      mark_slow_query(span) if @slow_query_threshold_ms
     end
 
     def force_flush(timeout: nil); end
@@ -168,9 +152,28 @@ module RailsOtelContext
       # Never let a user-supplied callback break span processing.
     end
 
+    def mark_slow_query(span)
+      return unless span.respond_to?(:attributes) && span.attributes&.key?('db.system')
+
+      start_ns = span.start_timestamp
+      end_ns   = span.end_timestamp
+      return unless start_ns && end_ns
+
+      duration_ms = (end_ns - start_ns) / 1_000_000.0
+      return unless duration_ms >= @slow_query_threshold_ms
+
+      # span.recording? is false here — the span has finished and current_span
+      # has reverted to the HTTP parent. Write directly to the backing attributes
+      # hash so db.slow lands on the actual DB span, not the HTTP parent.
+      attrs = span.instance_variable_get(:@attributes)
+      attrs.store(ActiveRecordContext::DB_SLOW_ATTR, true) if attrs.respond_to?(:store)
+    rescue StandardError
+      nil
+    end
+
     def snapshot_gc(span)
-      snapshots = Thread.current[GC_SNAPSHOT_KEY] ||= {}
-      snapshots[span.object_id] = [GC.stat(:count), GC.stat(:major_gc_count)]
+      snapshots = Thread.current[GC_SNAPSHOT_KEY] ||= {}.compare_by_identity
+      snapshots[span] = [GC.stat(:count), GC.stat(:major_gc_count)]
     rescue StandardError
       nil
     end
@@ -179,20 +182,20 @@ module RailsOtelContext
       snapshots = Thread.current[GC_SNAPSHOT_KEY]
       return unless snapshots
 
-      snapshot = snapshots.delete(span.object_id)
+      snapshot = snapshots.delete(span)
       return unless snapshot
 
       count_before, major_before = snapshot
       count_delta = GC.stat(:count) - count_before
       major_delta = GC.stat(:major_gc_count) - major_before
 
-      return if count_delta <= 0
+      return unless count_delta.positive?
 
       attrs = span.instance_variable_get(:@attributes)
       return unless attrs.respond_to?(:store)
 
       attrs.store('ruby.gc.count', count_delta)
-      attrs.store('ruby.gc.major_gc_count', major_delta) if major_delta > 0
+      attrs.store('ruby.gc.major_gc_count', major_delta) if major_delta.positive?
     rescue StandardError
       nil
     end
