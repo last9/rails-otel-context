@@ -24,9 +24,10 @@ module RailsOtelContext
   class CallContextProcessor
     include RailsOtelContext::SourceLocation
 
-    SPAN_CONTROLLER_ATTR = 'rails.controller'
-    SPAN_ACTION_ATTR     = 'rails.action'
-    SPAN_JOB_ATTR        = 'rails.job'
+    SPAN_CONTROLLER_ATTR  = 'rails.controller'
+    SPAN_ACTION_ATTR      = 'rails.action'
+    SPAN_JOB_ATTR         = 'rails.job'
+    SPAN_VIEW_ATTR        = 'rails.view.template'
     AR_MODEL_ATTR        = 'code.activerecord.model'
     AR_METHOD_ATTR       = 'code.activerecord.method'
     AR_SCOPE_ATTR        = 'code.activerecord.scope'
@@ -106,11 +107,12 @@ module RailsOtelContext
       if controller
         span.set_attribute(SPAN_CONTROLLER_ATTR, controller)
         span.set_attribute(SPAN_ACTION_ATTR, action) if action
-        return
+      elsif (job = RequestContext.job)
+        span.set_attribute(SPAN_JOB_ATTR, job)
       end
 
-      job = RequestContext.job
-      span.set_attribute(SPAN_JOB_ATTR, job) if job
+      view = RequestContext.view_template
+      span.set_attribute(SPAN_VIEW_ATTR, view) if view && !view.empty?
     end
 
     def apply_db_context(span)

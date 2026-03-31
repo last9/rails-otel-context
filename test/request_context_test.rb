@@ -169,4 +169,58 @@ class RequestContextTest < Minitest::Test
     RailsOtelContext::RequestContext.set(controller: 'UsersController', action: 'show')
     assert_nil Thread.current[RailsOtelContext::RequestContext::QUERY_COUNT_KEY]
   end
+
+  # ---------------------------------------------------------------------------
+  # View template stack
+  # ---------------------------------------------------------------------------
+
+  def test_view_template_returns_nil_when_empty
+    assert_nil RailsOtelContext::RequestContext.view_template
+  end
+
+  def test_push_and_read_view_template
+    RailsOtelContext::RequestContext.push_view_template('/app/views/users/index.html.erb')
+    assert_equal '/app/views/users/index.html.erb', RailsOtelContext::RequestContext.view_template
+  ensure
+    RailsOtelContext::RequestContext.pop_view_template
+  end
+
+  def test_nested_partials_use_innermost_template
+    RailsOtelContext::RequestContext.push_view_template('/app/views/users/index.html.erb')
+    RailsOtelContext::RequestContext.push_view_template('/app/views/users/_row.html.erb')
+    assert_equal '/app/views/users/_row.html.erb', RailsOtelContext::RequestContext.view_template
+    RailsOtelContext::RequestContext.pop_view_template
+    assert_equal '/app/views/users/index.html.erb', RailsOtelContext::RequestContext.view_template
+    RailsOtelContext::RequestContext.pop_view_template
+    assert_nil RailsOtelContext::RequestContext.view_template
+  end
+
+  def test_clear_resets_view_stack
+    RailsOtelContext::RequestContext.push_view_template('/app/views/users/index.html.erb')
+    RailsOtelContext::RequestContext.clear!
+    assert_nil RailsOtelContext::RequestContext.view_template
+    assert_nil Thread.current[RailsOtelContext::RequestContext::VIEW_STACK_KEY]
+  end
+
+  def test_view_template_propagated_to_span
+    processor = RailsOtelContext::CallContextProcessor.new(app_root: @app_root)
+    RailsOtelContext::RequestContext.set(controller: 'UsersController', action: 'index')
+    RailsOtelContext::RequestContext.push_view_template('/app/views/users/_row.html.erb')
+
+    span = FakeSpan.new
+    processor.on_start(span, nil)
+    assert_equal 'UsersController', span.attributes['rails.controller']
+    assert_equal '/app/views/users/_row.html.erb', span.attributes['rails.view.template']
+  ensure
+    RailsOtelContext::RequestContext.pop_view_template
+  end
+
+  def test_no_view_template_when_not_rendering
+    processor = RailsOtelContext::CallContextProcessor.new(app_root: @app_root)
+    RailsOtelContext::RequestContext.set(controller: 'UsersController', action: 'index')
+
+    span = FakeSpan.new
+    processor.on_start(span, nil)
+    refute span.attributes.key?('rails.view.template')
+  end
 end
