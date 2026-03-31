@@ -30,6 +30,25 @@ module RailsOtelContext
       @configuration = Configuration.new
     end
 
+    # Registers CallContextProcessor with the OTel tracer_provider.
+    # Called automatically by the Railtie after_initialize. Call this manually
+    # when OpenTelemetry::SDK.configure runs after Rails boot (e.g. in a custom
+    # after_initialize block):
+    #
+    #   OpenTelemetry::SDK.configure { |c| c.use_all() }
+    #   RailsOtelContext.install_processor!
+    #
+    # Safe to call multiple times — idempotent.
+    def install_processor!
+      return if @processor_installed
+      return unless defined?(Rails) && Rails.root
+      return unless OpenTelemetry.tracer_provider.respond_to?(:add_span_processor)
+
+      @processor_installed = true
+      processor = RailsOtelContext::CallContextProcessor.new(app_root: Rails.root)
+      OpenTelemetry.tracer_provider.add_span_processor(processor)
+    end
+
     # Convenience delegates to FrameContext — see FrameContext for full docs.
     def with_frame(class_name:, method_name:, &block)
       FrameContext.with_frame(class_name: class_name, method_name: method_name, &block)

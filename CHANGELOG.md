@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] - 2026-03-31
+
+### Fixed
+- **`RailsOtelContext.install_processor!`** — new public method that registers `CallContextProcessor` with the OTel tracer provider. Call this manually when `OpenTelemetry::SDK.configure` runs after the Railtie's `after_initialize` (e.g. inside a custom `config.after_initialize` block). The Railtie calls it automatically on the standard boot path. Idempotent — safe to call multiple times.
+
 ## [0.9.0] - 2026-03-31
 
 ### Changed (breaking)
