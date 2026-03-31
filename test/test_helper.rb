@@ -64,6 +64,17 @@ module CallerLocationHelpers
     with_multiple_caller_locations([location(path, label, lineno)], &block)
   end
 
+  # Stubs Thread.each_caller_location to return a single app-code frame built
+  # from a relative +path+ (joined to Dir.pwd) and optional +label+.
+  # Used by adapter tests that need to exercise call-site extraction.
+  def with_thread_source(path, lineno, label: nil, &block)
+    abs = File.join(Dir.pwd, path)
+    with_multiple_caller_locations(
+      [OpenStruct.new(absolute_path: abs, path: nil, lineno: lineno, label: label)],
+      &block
+    )
+  end
+
   def with_multiple_caller_locations(locations)
     thread_singleton = Thread.singleton_class
     had_original = Thread.respond_to?(:each_caller_location)

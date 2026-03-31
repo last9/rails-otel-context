@@ -37,12 +37,9 @@ module RailsOtelContext
             site = mod.call_site_for_app
             return super(command, redis_config, &block) unless site
 
-            attrs = {
-              'code.namespace' => site[:class_name],
-              'code.function'  => site[:method_name],
-              'code.filepath'  => site[:filepath],
-              'code.lineno'    => site[:lineno]
-            }.compact
+            attrs = { 'code.namespace' => site[:class_name], 'code.filepath' => site[:filepath] }
+            attrs['code.function'] = site[:method_name] if site[:method_name]
+            attrs['code.lineno']   = site[:lineno]      if site[:lineno]
             OpenTelemetry::Instrumentation::Redis.with_attributes(attrs) do
               super(command, redis_config, &block)
             end
@@ -52,12 +49,9 @@ module RailsOtelContext
             site = mod.call_site_for_app
             return super(commands, redis_config, &block) unless site
 
-            attrs = {
-              'code.namespace' => site[:class_name],
-              'code.function'  => site[:method_name],
-              'code.filepath'  => site[:filepath],
-              'code.lineno'    => site[:lineno]
-            }.compact
+            attrs = { 'code.namespace' => site[:class_name], 'code.filepath' => site[:filepath] }
+            attrs['code.function'] = site[:method_name] if site[:method_name]
+            attrs['code.lineno']   = site[:lineno]      if site[:lineno]
             OpenTelemetry::Instrumentation::Redis.with_attributes(attrs) do
               super(commands, redis_config, &block)
             end

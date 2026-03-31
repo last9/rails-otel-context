@@ -4,6 +4,7 @@ require_relative 'test_helper'
 require 'ostruct'
 
 class ClickhouseAdapterTest < Minitest::Test
+  include CallerLocationHelpers
   include SpanHelpers
 
   def setup
@@ -61,31 +62,6 @@ class ClickhouseAdapterTest < Minitest::Test
   end
 
   private
-
-  def with_thread_source(path, lineno, label: nil)
-    thread_singleton = Thread.singleton_class
-    location = OpenStruct.new(absolute_path: File.join(Dir.pwd, path), path: nil,
-                              lineno: lineno, label: label)
-    had_original = Thread.respond_to?(:each_caller_location)
-
-    if had_original
-      thread_singleton.class_eval do
-        alias_method :__rails_otel_context_original_each_caller_location, :each_caller_location
-      end
-    end
-    thread_singleton.define_method(:each_caller_location) { |&block| block.call(location) }
-
-    yield
-  ensure
-    if had_original
-      thread_singleton.class_eval do
-        alias_method :each_caller_location, :__rails_otel_context_original_each_caller_location
-        remove_method :__rails_otel_context_original_each_caller_location
-      end
-    else
-      thread_singleton.class_eval { remove_method :each_caller_location }
-    end
-  end
 
   def with_tracer_spy
     calls = []
