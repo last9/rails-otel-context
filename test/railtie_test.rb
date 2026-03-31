@@ -101,7 +101,7 @@ class RailtieTest < Minitest::Test
   end
 
   def test_around_action_clears_context_after_action
-    with_request_context_action('ProductsController', 'show') { }
+    with_request_context_action('ProductsController', 'show') {} # rubocop:disable Lint/EmptyBlock
 
     assert_nil RailsOtelContext::RequestContext.controller
     assert_nil RailsOtelContext::RequestContext.action
@@ -131,7 +131,7 @@ class RailtieTest < Minitest::Test
   end
 
   def test_job_context_clears_after_perform
-    with_job_context_perform('WeeklyReportJob') { }
+    with_job_context_perform('WeeklyReportJob') {} # rubocop:disable Lint/EmptyBlock
 
     assert_nil RailsOtelContext::RequestContext.job
   end
@@ -177,7 +177,7 @@ class RailtieTest < Minitest::Test
 
   private
 
-  def build_stub_controller_class(class_name, action_name, captured_blocks)
+  def build_stub_controller_class(class_name, _action_name, captured_blocks)
     stub = Class.new
     stub.define_singleton_method(:name)          { class_name }
     stub.define_singleton_method(:around_action) { |&blk| captured_blocks << blk }

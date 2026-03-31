@@ -560,7 +560,8 @@ class CallContextProcessorTest < Minitest::Test
     RailsOtelContext.configure { |c| c.slow_query_threshold_ms = threshold_ms }
     processor = RailsOtelContext::CallContextProcessor.new(app_root: @app_root)
     # Swap @processor so on_finish tests use the newly configured instance
-    orig, @processor = @processor, processor
+    orig = @processor
+    @processor = processor
     yield
   ensure
     @processor = orig

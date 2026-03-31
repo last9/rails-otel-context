@@ -20,7 +20,7 @@ class FrameContextTest < Minitest::Test
   end
 
   def test_with_frame_clears_after_block
-    RailsOtelContext::FrameContext.with_frame(class_name: 'OrderService', method_name: 'call') {}
+    RailsOtelContext::FrameContext.with_frame(class_name: 'OrderService', method_name: 'call') {} # rubocop:disable Lint/EmptyBlock
     assert_nil RailsOtelContext::FrameContext.current
   end
 

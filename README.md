@@ -81,14 +81,32 @@ Zero configuration gets you everything above. The optional initializer adds span
 ```ruby
 # config/initializers/rails_otel_context.rb
 RailsOtelContext.configure do |c|
-  # Rename DB spans from "SELECT" to "Transaction.recent_completed"
-  c.span_name_formatter = ->(original, ar) {
+  # Rename DB spans: prefer scope name, then calling method, then AR operation
+  #
+  # Priority (highest to lowest):
+  #   1. scope_name   — named scope or class method returning a Relation
+  #                     e.g. User.active, Transaction.recent_completed
+  #   2. code_function when code_namespace == model — the model's own class method
+  #                     e.g. Transaction.total_revenue, User.for_account
+  #   3. method_name  — AR operation: Load, Count, Update, Destroy…
+  #                     e.g. Transaction.Load, Transaction.Update
+  c.span_name_formatter = lambda { |original, ar|
     model = ar[:model_name]
     return original unless model
 
-    method = ar[:scope_name] ||
-             (ar[:code_function] if ar[:code_namespace] == model && !ar[:code_function]&.start_with?('<')) ||
-             ar[:method_name]
+    scope   = ar[:scope_name]
+    code_fn = ar[:code_function]
+    code_ns = ar[:code_namespace]
+    ar_op   = ar[:method_name]
+
+    method = if scope
+               scope
+             elsif code_fn && code_ns == model && !code_fn.start_with?('<')
+               code_fn
+             else
+               ar_op
+             end
+
     "#{model}.#{method}"
   }
 
@@ -190,47 +208,9 @@ Redis and ClickHouse spans get the same `code.*` attributes pointing to the app-
 
 ## Performance
 
-### Per-span cost
+`CallContextProcessor#on_start` fires for every span. For a typical 10–20 span request the overhead is in the low-microsecond range and does not require configuration.
 
-`CallContextProcessor#on_start` fires for every span. The main costs:
-
-**Stack walk (default, O(stack depth))**: `Thread.each_caller_location` iterates lazily and stops at the first app-code frame. Typically 15–25 frame checks through Rack/Rails/OTel internals. Each miss checks `absolute_path.start_with?(app_root)` — a string prefix test. On a hit, `build_call_site` allocates ~6–8 short-lived objects (a Hash, a few Strings). These are collected in the next minor GC; they do not accumulate.
-
-**Explicit override (O(1))**: `FrameContext.with_frame` / `Frameable#with_otel_frame` replace the walk with one thread-local read per span. Use this for code paths generating thousands of spans per second. For a typical 10–20 span request, the walk overhead is ~5–10 µs — measure before optimizing.
-
-### AR subscriber allocation budget
-
-The `sql.active_record` subscriber runs on every SQL query. The budget is enforced in CI:
-
-```
-ruby bench/allocation_guard.rb
-```
-
-```
-PASS  named query (User Load): 4.0 allocs/call (budget: 4)
-PASS  SQL-named counter cache UPDATE: 6.0 allocs/call (budget: 6)
-```
-
-Any increase requires updating the budget constant — a deliberate, reviewed decision.
-
-### Full profiling
-
-```
-bundle exec ruby bench/subscriber_hot_path.rb
-```
-
-Outputs throughput, per-call allocations with top allocating lines, and a StackProf CPU flamegraph at `tmp/subscriber.dump`:
-
-```
-stackprof --flamegraph tmp/subscriber.dump | open -f -a 'Google Chrome'
-```
-
-**Baseline (Ruby 3.3, Apple M-series):**
-
-| Path | Allocs/call | Throughput |
-|---|---|---|
-| Named AR query (`User Load`) | 4 objects | ~900k i/s |
-| SQL counter cache (`name=SQL`) | 6 objects | ~650k i/s |
+For code paths that generate hundreds of spans per second, `FrameContext.with_frame` / `Frameable#with_otel_frame` replace the per-span stack walk with a single thread-local read. See [Override for hot paths](#override-for-hot-paths).
 
 ### Boot cost
 

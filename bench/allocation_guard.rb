@@ -57,18 +57,18 @@ RailsOtelContext::ActiveRecordContext.instance_variable_set(
 )
 
 SUB      = RailsOtelContext::ActiveRecordContext::Subscriber.new
-EVENT_ID = 'bench-event'.freeze
+EVENT_ID = 'bench-event'
 
 CASES = [
   {
-    label:   'named query (User Load)',
+    label: 'named query (User Load)',
     payload: { name: 'User Load' }.freeze,
-    budget:  4
+    budget: 4
   },
   {
-    label:   'SQL-named counter cache UPDATE',
+    label: 'SQL-named counter cache UPDATE',
     payload: { name: 'SQL', sql: 'UPDATE `users` SET `comments_count` = 5 WHERE id = 1' }.freeze,
-    budget:  6
+    budget: 6
   }
 ].freeze
 
@@ -101,22 +101,22 @@ CASES.each do |c|
   status = per_call <= c[:budget] ? 'PASS' : 'FAIL'
   puts "#{status}  #{c[:label]}: #{per_call} allocs/call (budget: #{c[:budget]})"
 
-  if per_call > c[:budget]
-    failures << "#{c[:label]}: #{per_call} > #{c[:budget]} allocs/call"
+  next unless per_call > c[:budget]
 
-    puts "     top allocating lines:"
-    report.allocated_objects_by_location.first(5).each do |entry|
-      puts "       #{entry[:count].to_s.rjust(5)}x  #{entry[:data].sub(Dir.pwd + '/', '')}"
-    end
+  failures << "#{c[:label]}: #{per_call} > #{c[:budget]} allocs/call"
+
+  puts '     top allocating lines:'
+  report.allocated_objects_by_location.first(5).each do |entry|
+    puts "       #{entry[:count].to_s.rjust(5)}x  #{entry[:data].sub("#{Dir.pwd}/", '')}"
   end
 end
 
 puts
 if failures.empty?
-  puts "All allocation budgets met."
+  puts 'All allocation budgets met.'
   exit 0
 else
-  puts "Allocation budget exceeded:"
+  puts 'Allocation budget exceeded:'
   failures.each { |f| puts "  - #{f}" }
   exit 1
 end

@@ -62,13 +62,13 @@ end
 # ---------------------------------------------------------------------------
 
 RailsOtelContext.configure do |c|
-  c.slow_query_threshold_ms = 100  # enable timing path
+  c.slow_query_threshold_ms = 100 # enable timing path
 end
 
 SUB = RailsOtelContext::ActiveRecordContext::Subscriber.new
 
 # Simulates the most common query: a named AR query (e.g. "User Load")
-NAMED_PAYLOAD  = { name: 'User Load' }.freeze
+NAMED_PAYLOAD = { name: 'User Load' }.freeze
 
 # Simulates a counter-cache update (name="SQL")
 RailsOtelContext::ActiveRecordContext.instance_variable_set(
@@ -77,7 +77,7 @@ RailsOtelContext::ActiveRecordContext.instance_variable_set(
 SQL_PAYLOAD = { name: 'SQL', sql: 'UPDATE `users` SET `comments_count` = 5 WHERE id = 1' }.freeze
 
 # Stable event id (avoids object churn in the id slot)
-EVENT_ID = 'bench-event-1'.freeze
+EVENT_ID = 'bench-event-1'
 
 # ---------------------------------------------------------------------------
 # 1. Throughput — benchmark-ips
@@ -110,7 +110,7 @@ end
 puts "\n== memory_profiler: allocations per start+finish cycle ==\n\n"
 
 [
-  ['named query (User Load)',         NAMED_PAYLOAD],
+  ['named query (User Load)', NAMED_PAYLOAD],
   ['SQL-named (counter cache UPDATE)', SQL_PAYLOAD]
 ].each do |label, payload|
   report = MemoryProfiler.report(allow_files: 'rails_otel_context') do
@@ -132,9 +132,9 @@ puts "\n== memory_profiler: allocations per start+finish cycle ==\n\n"
   by_location = report.allocated_objects_by_location
                       .first(5)
   unless by_location.empty?
-    puts "  top allocating lines:"
+    puts '  top allocating lines:'
     by_location.each do |entry|
-      puts "    #{entry[:count].to_s.rjust(4)}x  #{entry[:data].sub(Dir.pwd + '/', '')}"
+      puts "    #{entry[:count].to_s.rjust(4)}x  #{entry[:data].sub("#{Dir.pwd}/", '')}"
     end
   end
   puts

@@ -23,10 +23,10 @@ class RedisAdapterTest < Minitest::Test
         result = middleware.call(['GET', 'k'], Object.new) { :ok }
         assert_equal :ok, result
         assert_equal 1, calls.size
-        assert_equal 'CacheService',                   calls[0]['code.namespace']
-        assert_equal 'fetch',                           calls[0]['code.function']
-        assert_equal 'app/services/cache_service.rb',  calls[0]['code.filepath']
-        assert_equal 21,                                calls[0]['code.lineno']
+        assert_equal 'CacheService', calls[0]['code.namespace']
+        assert_equal 'fetch', calls[0]['code.function']
+        assert_equal 'app/services/cache_service.rb', calls[0]['code.filepath']
+        assert_equal 21, calls[0]['code.lineno']
       end
     end
   end
@@ -44,10 +44,10 @@ class RedisAdapterTest < Minitest::Test
         result = middleware.call_pipelined([['SET', 'a', '1']], Object.new) { :ok }
         assert_equal :ok, result
         assert_equal 1, calls.size
-        assert_equal 'CacheService',                   calls[0]['code.namespace']
-        assert_equal 'warm',                            calls[0]['code.function']
-        assert_equal 'app/services/cache_service.rb',  calls[0]['code.filepath']
-        assert_equal 42,                                calls[0]['code.lineno']
+        assert_equal 'CacheService', calls[0]['code.namespace']
+        assert_equal 'warm', calls[0]['code.function']
+        assert_equal 'app/services/cache_service.rb', calls[0]['code.filepath']
+        assert_equal 42, calls[0]['code.lineno']
       end
     end
   end

@@ -65,10 +65,16 @@ Style/OpenStructUse:
 Style/Documentation:
   Enabled: false
 
-# test_helper legitimately groups related helper modules in one file
+# test_helper and bench harnesses legitimately group related stubs in one file
 Style/OneClassPerFile:
   Exclude:
     - 'test/**/*'
+    - 'bench/**/*'
+
+# bench stubs use minimal k/v params intentionally
+Naming/MethodParameterName:
+  Exclude:
+    - 'bench/**/*'
 
 # Allow explicit module assignment for closure access in adapters
 Style/RedundantAssignment:

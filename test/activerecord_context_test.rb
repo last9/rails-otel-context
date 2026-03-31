@@ -85,6 +85,7 @@ class ActiveRecordContextTest < Minitest::Test
     captured_scope = nil
     relation_class = Class.new do
       prepend RailsOtelContext::ActiveRecordContext::RelationScopeCapture
+
       define_method(:exec_queries) { captured_scope = Thread.current[:_rails_otel_ctx_scope] }
     end
     relation = relation_class.new
@@ -608,7 +609,6 @@ class ActiveRecordContextTest < Minitest::Test
   end
 
   # Slow query detection
-
 
   # parse_sql_context — SQL table-name parsing for name="SQL" notifications
   # (counter caches, touch_later, connection.execute)

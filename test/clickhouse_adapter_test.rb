@@ -34,7 +34,7 @@ class ClickhouseAdapterTest < Minitest::Test
         assert_equal 'clickhouse', span[:attributes]['db.system']
         assert_equal 'QUERY', span[:attributes]['db.operation']
         assert_equal 'SELECT 1', span[:attributes]['db.statement']
-        assert_equal 'WarehouseService',            span[:attributes]['code.namespace']
+        assert_equal 'WarehouseService', span[:attributes]['code.namespace']
         assert_equal 'load',                         span[:attributes]['code.function']
         assert_equal 'app/services/warehouse.rb',    span[:attributes]['code.filepath']
         assert_equal 14,                             span[:attributes]['code.lineno']
