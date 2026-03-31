@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.5] - 2026-03-31
+
+### Fixed
+- **ClickHouse spans missing `code.namespace`/`code.function`**: `build_patch_module` was calling `source_location_for_app` (filepath+lineno only) and `apply_source_to_span`. Switched to `call_site_for_app` + `apply_call_site_to_span` so ClickHouse spans now carry all four `code.*` attributes (`code.namespace`, `code.function`, `code.filepath`, `code.lineno`), consistent with PG/MySQL2/Trilogy.
+- **Redis spans missing `code.namespace`/`code.function`**: Redis's `build_patch_module` had an inline `source_location_for_app` implementation returning only `[filepath, lineno]`. Removed the duplicate; included `RailsOtelContext::SourceLocation` on `class << self` and switched to `call_site_for_app`. The `with_attributes` hash now includes all four `code.*` attributes (nils compacted out).
+
 ## [0.8.4] - 2026-03-31
 
 ### Fixed

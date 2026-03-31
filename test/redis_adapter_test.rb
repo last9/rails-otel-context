@@ -16,13 +16,15 @@ class RedisAdapterTest < Minitest::Test
     middleware_class.prepend(patch)
     middleware = middleware_class.new
 
-    with_thread_source('/app/services/cache_service.rb', 21) do
+    with_thread_source('/app/services/cache_service.rb', 21, label: 'CacheService#fetch') do
       with_redis_with_attributes_spy do |calls|
         result = middleware.call(['GET', 'k'], Object.new) { :ok }
         assert_equal :ok, result
         assert_equal 1, calls.size
-        assert_equal 'app/services/cache_service.rb', calls[0]['code.filepath']
-        assert_equal 21, calls[0]['code.lineno']
+        assert_equal 'CacheService',                   calls[0]['code.namespace']
+        assert_equal 'fetch',                           calls[0]['code.function']
+        assert_equal 'app/services/cache_service.rb',  calls[0]['code.filepath']
+        assert_equal 21,                                calls[0]['code.lineno']
       end
     end
   end
@@ -35,13 +37,15 @@ class RedisAdapterTest < Minitest::Test
     middleware_class.prepend(patch)
     middleware = middleware_class.new
 
-    with_thread_source('/app/services/cache_service.rb', 42) do
+    with_thread_source('/app/services/cache_service.rb', 42, label: 'CacheService#warm') do
       with_redis_with_attributes_spy do |calls|
         result = middleware.call_pipelined([['SET', 'a', '1']], Object.new) { :ok }
         assert_equal :ok, result
         assert_equal 1, calls.size
-        assert_equal 'app/services/cache_service.rb', calls[0]['code.filepath']
-        assert_equal 42, calls[0]['code.lineno']
+        assert_equal 'CacheService',                   calls[0]['code.namespace']
+        assert_equal 'warm',                            calls[0]['code.function']
+        assert_equal 'app/services/cache_service.rb',  calls[0]['code.filepath']
+        assert_equal 42,                                calls[0]['code.lineno']
       end
     end
   end
@@ -75,9 +79,10 @@ class RedisAdapterTest < Minitest::Test
     end
   end
 
-  def with_thread_source(path, lineno)
+  def with_thread_source(path, lineno, label: nil)
     thread_singleton = Thread.singleton_class
-    location = OpenStruct.new(absolute_path: File.join(Dir.pwd, path), path: nil, lineno: lineno)
+    location = OpenStruct.new(absolute_path: File.join(Dir.pwd, path), path: nil,
+                              lineno: lineno, label: label)
     had_original = Thread.respond_to?(:each_caller_location)
 
     if had_original

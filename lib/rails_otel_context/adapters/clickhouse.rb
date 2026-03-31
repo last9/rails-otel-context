@@ -64,7 +64,7 @@ module RailsOtelContext
             define_method(method_name) do |*args, &block|
               return super(*args, &block) if Thread.current[reentrancy_key]
 
-              source = mod.source_location_for_app
+              site      = mod.call_site_for_app
               statement = args.first.is_a?(String) ? args.first : nil
 
               tracer = OpenTelemetry.tracer_provider.tracer('rails-otel-context-clickhouse')
@@ -76,7 +76,7 @@ module RailsOtelContext
                 span.set_attribute('db.statement', statement) if statement
 
                 result = super(*args, &block)
-                mod.apply_source_to_span(span, source)
+                mod.apply_call_site_to_span(span, site)
                 result
               end
             ensure

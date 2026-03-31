@@ -24,47 +24,41 @@ module RailsOtelContext
       def build_patch_module
         mod = Module.new do
           class << self
+            include RailsOtelContext::SourceLocation
+
             attr_accessor :app_root
 
             def configure(app_root:)
               @app_root = app_root.to_s
             end
-
-            def source_location_for_app
-              return unless Thread.respond_to?(:each_caller_location)
-
-              Thread.each_caller_location do |location|
-                path = location.absolute_path || location.path
-                next unless path&.start_with?(app_root)
-                next if path.include?('/gems/')
-
-                return [path.delete_prefix("#{app_root}/"), location.lineno]
-              end
-
-              nil
-            end
           end
 
           define_method(:call) do |command, redis_config, &block|
-            source = mod.source_location_for_app
-            return super(command, redis_config, &block) unless source
+            site = mod.call_site_for_app
+            return super(command, redis_config, &block) unless site
 
-            OpenTelemetry::Instrumentation::Redis.with_attributes(
-              'code.filepath' => source[0],
-              'code.lineno' => source[1]
-            ) do
+            attrs = {
+              'code.namespace' => site[:class_name],
+              'code.function'  => site[:method_name],
+              'code.filepath'  => site[:filepath],
+              'code.lineno'    => site[:lineno]
+            }.compact
+            OpenTelemetry::Instrumentation::Redis.with_attributes(attrs) do
               super(command, redis_config, &block)
             end
           end
 
           define_method(:call_pipelined) do |commands, redis_config, &block|
-            source = mod.source_location_for_app
-            return super(commands, redis_config, &block) unless source
+            site = mod.call_site_for_app
+            return super(commands, redis_config, &block) unless site
 
-            OpenTelemetry::Instrumentation::Redis.with_attributes(
-              'code.filepath' => source[0],
-              'code.lineno' => source[1]
-            ) do
+            attrs = {
+              'code.namespace' => site[:class_name],
+              'code.function'  => site[:method_name],
+              'code.filepath'  => site[:filepath],
+              'code.lineno'    => site[:lineno]
+            }.compact
+            OpenTelemetry::Instrumentation::Redis.with_attributes(attrs) do
               super(commands, redis_config, &block)
             end
           end
