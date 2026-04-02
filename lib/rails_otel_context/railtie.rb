@@ -49,12 +49,30 @@ module RailsOtelContext
             action: action_name
           )
           block.call
+        rescue StandardError => e
+          RailsOtelContext::Railtie.record_exception_on_current_span(e)
+          raise
         ensure
           RailsOtelContext::RequestContext.clear!
         end
       end
       ActiveSupport.on_load(:action_controller, &around_action_hook)
       ActiveSupport.on_load(:action_controller_api, &around_action_hook)
+    end
+
+    # Records an exception on the current OTel span using the standard
+    # OTel event convention (exception.type, exception.message, exception.stacktrace).
+    # Called from around_action rescue and around_perform rescue.
+    def self.record_exception_on_current_span(exception)
+      return unless defined?(OpenTelemetry::Trace)
+
+      span = OpenTelemetry::Trace.current_span
+      return unless span.context.valid?
+
+      span.record_exception(exception)
+      span.status = OpenTelemetry::Trace::Status.error(exception.message)
+    rescue StandardError
+      nil
     end
 
     # Capture job class name for every ActiveJob execution and propagate it to all
@@ -64,6 +82,9 @@ module RailsOtelContext
         around_perform do |_job, block|
           RailsOtelContext::RequestContext.set_job(job_class: self.class.name)
           block.call
+        rescue StandardError => e
+          RailsOtelContext::Railtie.record_exception_on_current_span(e)
+          raise
         ensure
           RailsOtelContext::RequestContext.clear_job!
         end

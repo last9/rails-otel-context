@@ -175,6 +175,10 @@ class RailtieTest < Minitest::Test
     assert_kind_of Hash, RailsOtelContext::ActiveRecordContext.ar_table_model_map
   end
 
+  def test_record_exception_noop_without_otel
+    assert_nil RailsOtelContext::Railtie.record_exception_on_current_span(RuntimeError.new('boom'))
+  end
+
   private
 
   def build_stub_controller_class(class_name, _action_name, captured_blocks)
