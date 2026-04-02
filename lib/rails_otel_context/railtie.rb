@@ -62,7 +62,12 @@ module RailsOtelContext
     initializer 'rails_otel_context.install_job_context' do
       ActiveSupport.on_load(:active_job) do
         around_perform do |_job, block|
-          RailsOtelContext::RequestContext.set_job(job_class: self.class.name)
+          enqueued = respond_to?(:enqueued_at) ? enqueued_at : nil
+          latency_ms = enqueued && ((Time.now - enqueued) * 1000.0).round(2)
+          RailsOtelContext::RequestContext.set_job(
+            job_class: self.class.name,
+            queue_latency_ms: latency_ms
+          )
           block.call
         ensure
           RailsOtelContext::RequestContext.clear_job!

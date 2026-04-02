@@ -24,9 +24,10 @@ module RailsOtelContext
   class CallContextProcessor
     include RailsOtelContext::SourceLocation
 
-    SPAN_CONTROLLER_ATTR = 'rails.controller'
-    SPAN_ACTION_ATTR     = 'rails.action'
-    SPAN_JOB_ATTR        = 'rails.job'
+    SPAN_CONTROLLER_ATTR        = 'rails.controller'
+    SPAN_ACTION_ATTR            = 'rails.action'
+    SPAN_JOB_ATTR               = 'rails.job'
+    SPAN_JOB_QUEUE_LATENCY_ATTR = 'rails.job.queue_latency_ms'
     AR_MODEL_ATTR        = 'code.activerecord.model'
     AR_METHOD_ATTR       = 'code.activerecord.method'
     AR_SCOPE_ATTR        = 'code.activerecord.scope'
@@ -110,7 +111,11 @@ module RailsOtelContext
       end
 
       job = RequestContext.job
-      span.set_attribute(SPAN_JOB_ATTR, job) if job
+      return unless job
+
+      span.set_attribute(SPAN_JOB_ATTR, job)
+      latency = RequestContext.queue_latency_ms
+      span.set_attribute(SPAN_JOB_QUEUE_LATENCY_ATTR, latency) if latency
     end
 
     def apply_db_context(span)

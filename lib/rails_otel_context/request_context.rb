@@ -19,6 +19,7 @@ module RailsOtelContext
     CONTROLLER_KEY  = :_rails_otel_ctx_controller
     ACTION_KEY      = :_rails_otel_ctx_action
     JOB_KEY         = :_rails_otel_ctx_job
+    JOB_LATENCY_KEY = :_rails_otel_ctx_job_latency
     QUERY_COUNT_KEY = :_rails_otel_ctx_qcount
 
     class << self
@@ -28,8 +29,9 @@ module RailsOtelContext
         Thread.current[QUERY_COUNT_KEY] = nil
       end
 
-      def set_job(job_class:)
+      def set_job(job_class:, queue_latency_ms: nil)
         Thread.current[JOB_KEY]         = job_class
+        Thread.current[JOB_LATENCY_KEY] = queue_latency_ms
         Thread.current[QUERY_COUNT_KEY] = nil
       end
 
@@ -51,15 +53,21 @@ module RailsOtelContext
         Thread.current[JOB_KEY]
       end
 
+      def queue_latency_ms
+        Thread.current[JOB_LATENCY_KEY]
+      end
+
       def clear!
         Thread.current[CONTROLLER_KEY]  = nil
         Thread.current[ACTION_KEY]      = nil
         Thread.current[JOB_KEY]         = nil
+        Thread.current[JOB_LATENCY_KEY] = nil
         Thread.current[QUERY_COUNT_KEY] = nil
       end
 
       def clear_job!
         Thread.current[JOB_KEY]         = nil
+        Thread.current[JOB_LATENCY_KEY] = nil
         Thread.current[QUERY_COUNT_KEY] = nil
       end
     end
