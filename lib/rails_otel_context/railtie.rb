@@ -48,6 +48,7 @@ module RailsOtelContext
             controller: self.class.name,
             action: action_name
           )
+          RailsOtelContext::Railtie.apply_connection_pool_stats
           block.call
         ensure
           RailsOtelContext::RequestContext.clear!
@@ -55,6 +56,23 @@ module RailsOtelContext
       end
       ActiveSupport.on_load(:action_controller, &around_action_hook)
       ActiveSupport.on_load(:action_controller_api, &around_action_hook)
+    end
+
+    # Stamps AR connection pool stats onto the current (HTTP root) span once per
+    # request. Called from around_action — fires exactly once, not per child span.
+    # Skipped if AR or OTel is unavailable, or if the pool doesn't respond to stat.
+    def self.apply_connection_pool_stats
+      return unless defined?(::ActiveRecord::Base) && defined?(OpenTelemetry::Trace)
+
+      span = OpenTelemetry::Trace.current_span
+      return unless span.context.valid?
+
+      stat = ::ActiveRecord::Base.connection_pool.stat
+      span.set_attribute('db.pool.size',        stat[:size])
+      span.set_attribute('db.pool.checked_out', stat[:busy] || stat[:checked_out] || 0)
+      span.set_attribute('db.pool.waiting',     stat[:waiting])
+    rescue StandardError
+      nil
     end
 
     # Capture job class name for every ActiveJob execution and propagate it to all

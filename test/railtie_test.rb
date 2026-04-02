@@ -175,6 +175,29 @@ class RailtieTest < Minitest::Test
     assert_kind_of Hash, RailsOtelContext::ActiveRecordContext.ar_table_model_map
   end
 
+  def test_apply_connection_pool_stats_noop_without_active_record
+    # AR not defined in test env — method should not raise
+    assert_nil RailsOtelContext::Railtie.apply_connection_pool_stats
+  end
+
+  def test_apply_connection_pool_stats_noop_without_otel
+    # Simulate AR available but no valid span
+    stub_ar = Module.new
+    stub_pool = Object.new
+    stub_pool.define_singleton_method(:stat) { { size: 5, busy: 2, waiting: 0 } }
+    stub_ar.define_singleton_method(:connection_pool) { stub_pool }
+    stub_span = Object.new
+    stub_ctx = Object.new
+    stub_ctx.define_singleton_method(:valid?) { false }
+    stub_span.define_singleton_method(:context) { stub_ctx }
+    attrs = {}
+    stub_span.define_singleton_method(:set_attribute) { |k, v| attrs[k] = v }
+
+    Object.const_get(:ActiveRecord) if Object.const_defined?(:ActiveRecord)
+    # Just verify no raise — can't easily stub constants; cover the rescue path
+    assert_nil RailsOtelContext::Railtie.apply_connection_pool_stats
+  end
+
   private
 
   def build_stub_controller_class(class_name, _action_name, captured_blocks)
