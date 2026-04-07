@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.6] - 2026-04-07
+
+### Added
+- **`RailsOtelContext.install!`** — new public method for apps that load the gem with `require: false` and require it conditionally inside `config/initializers/`. When gems are required inside an initializer, Railtie `initializer` blocks have already executed and all `ActiveSupport.on_load` hooks are missed — `rails.controller`, `rails.action`, `rails.job`, `code.activerecord.*` are all absent from spans. Calling `RailsOtelContext.install!` from the same initializer registers all hooks (AR, controller, API controller, job) and installs the span processor regardless of load order. Idempotent — safe to call multiple times.
+
 ## [0.9.4] - 2026-03-31
 
 ### Fixed
