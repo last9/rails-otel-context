@@ -71,9 +71,11 @@ module RailsOtelContext
       nil
     end
 
-    def force_flush(timeout: nil); end
-
-    def shutdown(timeout: nil); end
+    # Return Export::SUCCESS (0) so the SDK's tracer_provider.force_flush/shutdown
+    # can safely call results.max across all registered processors without raising
+    # ArgumentError when mixing our return value with integer status codes.
+    def force_flush(**) = 0
+    def shutdown(**) = 0
 
     private
 
