@@ -118,6 +118,37 @@ RailsOtelContext.configure do |c|
 end
 ```
 
+## Conditional loading (`require: false`)
+
+If your Gemfile has `require: false` and you load the gem from an initializer, call `RailsOtelContext.install!` explicitly. Loading the gem inside `config/initializers/` is too late for Rails to run the railtie's initializer hooks, so without an explicit `install!` call the AR subscriber and `around_action` hooks are never registered — `code.activerecord.*` and `rails.controller` will be absent from all spans.
+
+```ruby
+# Gemfile
+gem 'rails-otel-context', '~> 0.9', require: false
+
+# config/initializers/opentelemetry.rb
+return unless ENV['ENABLE_OTLP']
+
+require 'rails_otel_context'
+
+RailsOtelContext.configure do |c|
+  c.span_name_formatter = lambda { |original, ar| ... }
+end
+
+RailsOtelContext.install! # registers AR hooks, around_action, and the span processor
+
+require 'opentelemetry/sdk'
+require 'opentelemetry/exporter/otlp'
+require 'opentelemetry/instrumentation/all'
+
+OpenTelemetry::SDK.configure do |c|
+  c.service_name = ENV.fetch('OTEL_SERVICE_NAME', 'my_app')
+  c.use_all
+end
+```
+
+`install!` is idempotent — the railtie calls it automatically via `after_initialize`, so apps that let Bundler auto-require the gem do not need to call it.
+
 ## How `code.namespace` / `code.function` works
 
 On every span start, the gem walks the Ruby call stack (`Thread.each_caller_location`) and finds the first frame inside `Rails.root`. That frame becomes the four `code.*` attributes.
