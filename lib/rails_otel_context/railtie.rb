@@ -5,23 +5,12 @@ require 'rails_otel_context/call_context_processor'
 
 module RailsOtelContext
   class Railtie < Rails::Railtie
-    initializer 'rails_otel_context.install_adapters' do
-      ActiveSupport.on_load(:active_record) do
-        RailsOtelContext::Adapters.install!(app_root: Rails.root, config: RailsOtelContext.configuration)
-        RailsOtelContext::ActiveRecordContext.install!(app_root: Rails.root)
-      end
-    end
-
-    # Runs after config/initializers/ so the OTel SDK tracer_provider is already configured.
+    # Runs after config/initializers/ so the OTel SDK tracer_provider is already
+    # configured. install! is idempotent — if the app already called
+    # RailsOtelContext.install! from an initializer this is a no-op for hooks,
+    # but install_processor! still runs (it self-guards with @processor_installed).
     config.after_initialize do
-      RailsOtelContext.install_processor!
-
-      # Warm the table→model map once at boot (after eager_load! in production so
-      # all descendants are available). Without this, the first SQL-named span on a
-      # cold boot hits an empty map and falls through without model context.
-      ActiveSupport.on_load(:active_record) do
-        RailsOtelContext::ActiveRecordContext.ar_table_model_map
-      end
+      RailsOtelContext.install!
     end
 
     # Reset the table→model map after every code reload in development.
@@ -30,44 +19,6 @@ module RailsOtelContext
     # referenced models are loaded, guaranteeing a fresh index.
     config.to_prepare do
       RailsOtelContext::ActiveRecordContext.reset_ar_table_model_map!
-    end
-
-    # Capture controller + action for every request and propagate them to all
-    # child spans via RequestContext. Also resets the N+1 query counter at both
-    # the start and end of every request to prevent bleed across Puma thread reuse.
-    # Always-on — no config gate.
-    #
-    # Both hooks are required: ActionController::Base fires :action_controller,
-    # ActionController::API (Rails API-only apps) fires :action_controller_api.
-    # In Rails 8 API-only apps :action_controller never fires, so without the
-    # second hook rails.controller / rails.action would be absent from every span.
-    initializer 'rails_otel_context.install_request_context' do
-      around_action_hook = proc do
-        around_action do |_controller, block|
-          RailsOtelContext::RequestContext.set(
-            controller: self.class.name,
-            action: action_name
-          )
-          block.call
-        ensure
-          RailsOtelContext::RequestContext.clear!
-        end
-      end
-      ActiveSupport.on_load(:action_controller, &around_action_hook)
-      ActiveSupport.on_load(:action_controller_api, &around_action_hook)
-    end
-
-    # Capture job class name for every ActiveJob execution and propagate it to all
-    # child spans via RequestContext so rails.job appears on every span in the job.
-    initializer 'rails_otel_context.install_job_context' do
-      ActiveSupport.on_load(:active_job) do
-        around_perform do |_job, block|
-          RailsOtelContext::RequestContext.set_job(job_class: self.class.name)
-          block.call
-        ensure
-          RailsOtelContext::RequestContext.clear_job!
-        end
-      end
     end
   end
 end

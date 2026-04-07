@@ -30,13 +30,32 @@ module RailsOtelContext
       @configuration = Configuration.new
     end
 
-    # Registers CallContextProcessor with the OTel tracer_provider.
-    # Called automatically by the Railtie after_initialize. Call this manually
-    # when OpenTelemetry::SDK.configure runs after Rails boot (e.g. in a custom
-    # after_initialize block):
+    # Full installation: registers all Rails hooks (AR adapters, around_action,
+    # around_perform) and the CallContextProcessor. Safe to call from a
+    # config/initializers file when the gem is loaded with require: false:
     #
-    #   OpenTelemetry::SDK.configure { |c| c.use_all() }
-    #   RailsOtelContext.install_processor!
+    #   # config/initializers/opentelemetry.rb
+    #   return unless ENV['ENABLE_OTLP']
+    #   require 'rails_otel_context'
+    #   RailsOtelContext.configure { |c| ... }
+    #   RailsOtelContext.install!
+    #
+    # The Railtie calls this automatically via after_initialize, so apps that
+    # let Bundler auto-require the gem do not need to call it explicitly.
+    # Safe to call multiple times — idempotent.
+    def install!(app_root: nil)
+      app_root ||= Rails.root if defined?(Rails)
+      register_hooks!(app_root) unless @hooks_installed
+      install_processor!
+    end
+
+    # Registers CallContextProcessor with the OTel tracer_provider.
+    # Called automatically by install!. Call this manually only when the OTel
+    # SDK is configured after install! has already run (rare):
+    #
+    #   RailsOtelContext.install!          # hooks up AR/request context
+    #   OpenTelemetry::SDK.configure { … } # SDK configured later
+    #   RailsOtelContext.install_processor! # add processor to the now-real provider
     #
     # Safe to call multiple times — idempotent.
     def install_processor!
@@ -48,6 +67,43 @@ module RailsOtelContext
       processor = RailsOtelContext::CallContextProcessor.new(app_root: Rails.root)
       OpenTelemetry.tracer_provider.add_span_processor(processor)
     end
+
+    private
+
+    def register_hooks!(app_root)
+      @hooks_installed = true
+
+      ActiveSupport.on_load(:active_record) do
+        RailsOtelContext::Adapters.install!(app_root: app_root, config: RailsOtelContext.configuration)
+        RailsOtelContext::ActiveRecordContext.install!(app_root: app_root)
+        RailsOtelContext::ActiveRecordContext.ar_table_model_map
+      end
+
+      around_action_hook = proc do
+        around_action do |_controller, block|
+          RailsOtelContext::RequestContext.set(
+            controller: self.class.name,
+            action: action_name
+          )
+          block.call
+        ensure
+          RailsOtelContext::RequestContext.clear!
+        end
+      end
+      ActiveSupport.on_load(:action_controller, &around_action_hook)
+      ActiveSupport.on_load(:action_controller_api, &around_action_hook)
+
+      ActiveSupport.on_load(:active_job) do
+        around_perform do |_job, block|
+          RailsOtelContext::RequestContext.set_job(job_class: self.class.name)
+          block.call
+        ensure
+          RailsOtelContext::RequestContext.clear_job!
+        end
+      end
+    end
+
+    public
 
     # Convenience delegates to FrameContext — see FrameContext for full docs.
     def with_frame(class_name:, method_name:, &block)
