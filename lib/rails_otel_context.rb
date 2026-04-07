@@ -45,40 +45,7 @@ module RailsOtelContext
     # Safe to call multiple times — idempotent.
     def install!(app_root: nil)
       app_root ||= Rails.root if defined?(Rails)
-
-      unless @hooks_installed
-        @hooks_installed = true
-
-        ActiveSupport.on_load(:active_record) do
-          RailsOtelContext::Adapters.install!(app_root: app_root, config: RailsOtelContext.configuration)
-          RailsOtelContext::ActiveRecordContext.install!(app_root: app_root)
-          RailsOtelContext::ActiveRecordContext.ar_table_model_map
-        end
-
-        around_action_hook = proc do
-          around_action do |_controller, block|
-            RailsOtelContext::RequestContext.set(
-              controller: self.class.name,
-              action: action_name
-            )
-            block.call
-          ensure
-            RailsOtelContext::RequestContext.clear!
-          end
-        end
-        ActiveSupport.on_load(:action_controller, &around_action_hook)
-        ActiveSupport.on_load(:action_controller_api, &around_action_hook)
-
-        ActiveSupport.on_load(:active_job) do
-          around_perform do |_job, block|
-            RailsOtelContext::RequestContext.set_job(job_class: self.class.name)
-            block.call
-          ensure
-            RailsOtelContext::RequestContext.clear_job!
-          end
-        end
-      end
-
+      register_hooks!(app_root) unless @hooks_installed
       install_processor!
     end
 
@@ -100,6 +67,43 @@ module RailsOtelContext
       processor = RailsOtelContext::CallContextProcessor.new(app_root: Rails.root)
       OpenTelemetry.tracer_provider.add_span_processor(processor)
     end
+
+    private
+
+    def register_hooks!(app_root)
+      @hooks_installed = true
+
+      ActiveSupport.on_load(:active_record) do
+        RailsOtelContext::Adapters.install!(app_root: app_root, config: RailsOtelContext.configuration)
+        RailsOtelContext::ActiveRecordContext.install!(app_root: app_root)
+        RailsOtelContext::ActiveRecordContext.ar_table_model_map
+      end
+
+      around_action_hook = proc do
+        around_action do |_controller, block|
+          RailsOtelContext::RequestContext.set(
+            controller: self.class.name,
+            action: action_name
+          )
+          block.call
+        ensure
+          RailsOtelContext::RequestContext.clear!
+        end
+      end
+      ActiveSupport.on_load(:action_controller, &around_action_hook)
+      ActiveSupport.on_load(:action_controller_api, &around_action_hook)
+
+      ActiveSupport.on_load(:active_job) do
+        around_perform do |_job, block|
+          RailsOtelContext::RequestContext.set_job(job_class: self.class.name)
+          block.call
+        ensure
+          RailsOtelContext::RequestContext.clear_job!
+        end
+      end
+    end
+
+    public
 
     # Convenience delegates to FrameContext — see FrameContext for full docs.
     def with_frame(class_name:, method_name:, &block)
