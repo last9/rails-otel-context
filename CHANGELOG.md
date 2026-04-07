@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.5] - 2026-04-07
+
+### Fixed
+- **`force_flush` / `shutdown` returning `nil`**: `CallContextProcessor#force_flush` and `#shutdown` previously returned `nil` (implicit Ruby return). The OTel SDK's `tracer_provider.force_flush` aggregates processor results with `results.max` — passing `nil` alongside integer status codes raises `ArgumentError: comparison of Integer with nil failed`. Both methods now return `0` (`Export::SUCCESS`), matching the SDK contract. Triggered in production during `db:schema:dump` and other `force_flush` call sites.
+
 ## [0.9.4] - 2026-03-31
 
 ### Fixed
