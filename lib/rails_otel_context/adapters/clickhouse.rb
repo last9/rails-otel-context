@@ -8,7 +8,7 @@ module RailsOtelContext
       CANDIDATE_METHODS = %i[query select insert execute command].freeze
       REENTRANCY_KEY = :_rails_otel_ctx_clickhouse_instrumenting
 
-      def install!(app_root:)
+      def install!(app_root:, **)
         begin
           require 'click_house'
         rescue LoadError

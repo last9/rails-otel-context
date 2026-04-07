@@ -32,7 +32,8 @@ module RailsOtelContext
     AR_SCOPE_ATTR        = 'code.activerecord.scope'
     AR_QUERY_COUNT_ATTR  = 'db.query_count'
     AR_ASYNC_ATTR        = 'db.async'
-    ORIG_NAME_ATTR       = 'l9.orig.name'
+    ORIG_NAME_ATTR          = 'l9.orig.name'
+    ALLOC_SNAPSHOT_KEY      = :__rails_otel_alloc_snapshot__
 
     # Exposed so SourceLocation mixin can use it for the stack-walk path.
     attr_reader :app_root
@@ -42,6 +43,7 @@ module RailsOtelContext
       @custom_span_attributes  = config.custom_span_attributes
       @span_name_formatter     = config.span_name_formatter
       @slow_query_threshold_ms = config.slow_query_threshold_ms
+      @track_allocations       = config.track_allocations
     end
 
     def on_start(span, _parent_context)
@@ -49,26 +51,12 @@ module RailsOtelContext
       apply_request_context(span)
       apply_db_context(span)
       apply_custom_attributes(span) if @custom_span_attributes
+      snapshot_allocations(span) if @track_allocations
     end
 
     def on_finish(span)
-      return unless @slow_query_threshold_ms
-      return unless span.respond_to?(:attributes) && span.attributes&.key?('db.system')
-
-      start_ns = span.start_timestamp
-      end_ns   = span.end_timestamp
-      return unless start_ns && end_ns
-
-      duration_ms = (end_ns - start_ns) / 1_000_000.0
-      return unless duration_ms >= @slow_query_threshold_ms
-
-      # span.recording? is false here — the span has finished and current_span
-      # has reverted to the HTTP parent. Write directly to the backing attributes
-      # hash so db.slow lands on the actual DB span, not the HTTP parent.
-      attrs = span.instance_variable_get(:@attributes)
-      attrs.store(ActiveRecordContext::DB_SLOW_ATTR, true) if attrs.respond_to?(:store)
-    rescue StandardError
-      nil
+      apply_allocation_delta(span) if @track_allocations
+      mark_slow_query(span) if @slow_query_threshold_ms
     end
 
     # Return Export::SUCCESS (0) so the SDK's tracer_provider.force_flush/shutdown
@@ -164,6 +152,48 @@ module RailsOtelContext
       end
     rescue StandardError
       # Never let a user-supplied callback break span processing.
+    end
+
+    def mark_slow_query(span)
+      return unless span.respond_to?(:attributes) && span.attributes&.key?('db.system')
+
+      start_ns = span.start_timestamp
+      end_ns   = span.end_timestamp
+      return unless start_ns && end_ns
+
+      duration_ms = (end_ns - start_ns) / 1_000_000.0
+      return unless duration_ms >= @slow_query_threshold_ms
+
+      # span.recording? is false here — the span has finished and current_span
+      # has reverted to the HTTP parent. Write directly to the backing attributes
+      # hash so db.slow lands on the actual DB span, not the HTTP parent.
+      attrs = span.instance_variable_get(:@attributes)
+      attrs.store(ActiveRecordContext::DB_SLOW_ATTR, true) if attrs.respond_to?(:store)
+    rescue StandardError
+      nil
+    end
+
+    def snapshot_allocations(span)
+      snapshots = Thread.current[ALLOC_SNAPSHOT_KEY] ||= {}.compare_by_identity
+      snapshots[span] = GC.stat(:total_allocated_objects)
+    rescue StandardError
+      nil
+    end
+
+    def apply_allocation_delta(span)
+      snapshots = Thread.current[ALLOC_SNAPSHOT_KEY]
+      return unless snapshots
+
+      before = snapshots.delete(span)
+      return unless before
+
+      delta = GC.stat(:total_allocated_objects) - before
+      return unless delta.positive?
+
+      attrs = span.instance_variable_get(:@attributes)
+      attrs.store('ruby.allocations', delta) if attrs.respond_to?(:store)
+    rescue StandardError
+      nil
     end
   end
 end
