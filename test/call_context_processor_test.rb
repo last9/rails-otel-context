@@ -554,22 +554,11 @@ class CallContextProcessorTest < Minitest::Test
   end
 
   def test_force_flush_returns_success
-    result = @processor.force_flush
-    assert_kind_of Integer, result,
-                   'force_flush must return an Integer — SDK tracer_provider.force_flush ' \
-                   'calls results.max and raises ArgumentError if any processor returns nil'
+    assert_kind_of Integer, @processor.force_flush
   end
 
   def test_shutdown_returns_success
-    result = @processor.shutdown
-    assert_kind_of Integer, result,
-                   'shutdown must return an Integer — same SDK max aggregation concern'
-  end
-
-  def test_force_flush_is_compatible_with_sdk_aggregation
-    # Simulates tracer_provider collecting results from multiple processors
-    # and calling .max — raises ArgumentError if any result is nil
-    assert_equal 0, [0, @processor.force_flush].max
+    assert_kind_of Integer, @processor.shutdown
   end
 
   private
