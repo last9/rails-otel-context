@@ -553,12 +553,12 @@ class CallContextProcessorTest < Minitest::Test
     end
   end
 
-  def test_force_flush_is_a_noop
-    assert_nil @processor.force_flush
+  def test_force_flush_returns_success
+    assert_kind_of Integer, @processor.force_flush
   end
 
-  def test_shutdown_is_a_noop
-    assert_nil @processor.shutdown
+  def test_shutdown_returns_success
+    assert_kind_of Integer, @processor.shutdown
   end
 
   private

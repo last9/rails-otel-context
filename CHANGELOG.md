@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **`RailsOtelContext.install!`** — new public method for apps that load the gem with `require: false` and require it conditionally inside `config/initializers/`. When gems are required inside an initializer, Railtie `initializer` blocks have already executed and all `ActiveSupport.on_load` hooks are missed — `rails.controller`, `rails.action`, `rails.job`, `code.activerecord.*` are all absent from spans. Calling `RailsOtelContext.install!` from the same initializer registers all hooks (AR, controller, API controller, job) and installs the span processor regardless of load order. Idempotent — safe to call multiple times.
 
+## [0.9.5] - 2026-04-07
+
+### Fixed
+- **`force_flush` / `shutdown` returning `nil`**: `CallContextProcessor#force_flush` and `#shutdown` previously returned `nil` (implicit Ruby return). The OTel SDK's `tracer_provider.force_flush` aggregates processor results with `results.max` — passing `nil` alongside integer status codes raises `ArgumentError: comparison of Integer with nil failed`. Both methods now return `0` (`Export::SUCCESS`), matching the SDK contract. Triggered in production during `db:schema:dump` and other `force_flush` call sites.
+
 ## [0.9.4] - 2026-03-31
 
 ### Fixed
