@@ -16,10 +16,11 @@ module RailsOtelContext
   #
   # Thread safety: each Puma/Sidekiq thread owns its slot — no sharing, no contention.
   module RequestContext
-    CONTROLLER_KEY  = :_rails_otel_ctx_controller
-    ACTION_KEY      = :_rails_otel_ctx_action
-    JOB_KEY         = :_rails_otel_ctx_job
-    QUERY_COUNT_KEY = :_rails_otel_ctx_qcount
+    CONTROLLER_KEY   = :_rails_otel_ctx_controller
+    ACTION_KEY       = :_rails_otel_ctx_action
+    JOB_KEY          = :_rails_otel_ctx_job
+    QUERY_COUNT_KEY  = :_rails_otel_ctx_qcount
+    VIEW_STACK_KEY   = :_rails_otel_ctx_view_stack
 
     class << self
       def set(controller:, action:)
@@ -51,11 +52,29 @@ module RailsOtelContext
         Thread.current[JOB_KEY]
       end
 
+      # Returns the identifier of the innermost template/partial currently rendering,
+      # or nil when no view rendering is in progress.
+      def view_template
+        stack = Thread.current[VIEW_STACK_KEY]
+        stack&.last
+      end
+
+      def push_view_template(identifier)
+        stack = Thread.current[VIEW_STACK_KEY] ||= []
+        stack.push(identifier.to_s)
+      end
+
+      def pop_view_template
+        stack = Thread.current[VIEW_STACK_KEY]
+        stack&.pop
+      end
+
       def clear!
         Thread.current[CONTROLLER_KEY]  = nil
         Thread.current[ACTION_KEY]      = nil
         Thread.current[JOB_KEY]         = nil
         Thread.current[QUERY_COUNT_KEY] = nil
+        Thread.current[VIEW_STACK_KEY]  = nil
       end
 
       def clear_job!
