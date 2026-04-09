@@ -46,19 +46,11 @@ module RailsOtelContext
           # created inside super picks it up via CallContextProcessor#on_start.
           methods.each do |method_name|
             define_method(method_name) do |*args, &user_block|
-              site = mod.call_site_for_app
-              if site
-                RailsOtelContext::FrameContext.push(
-                  class_name: site[:class_name], method_name: site[:method_name],
-                  filepath: site[:filepath], lineno: site[:lineno]
-                )
+              mod.with_call_site_frame do
+                super(*args) do |result|
+                  user_block ? user_block.call(result) : result
+                end
               end
-
-              super(*args) do |result|
-                user_block ? user_block.call(result) : result
-              end
-            ensure
-              RailsOtelContext::FrameContext.pop if site
             end
           end
         end

@@ -34,19 +34,8 @@ module RailsOtelContext
 
           # Push call-site into FrameContext BEFORE super so the OTel child span
           # created inside super picks it up via CallContextProcessor#on_start.
-          # The old approach (apply_call_site_to_span after super) targeted
-          # current_span which had already reverted to the parent.
           define_method(:query) do |sql|
-            site = mod.call_site_for_app
-            if site
-              RailsOtelContext::FrameContext.push(
-                class_name: site[:class_name], method_name: site[:method_name],
-                filepath: site[:filepath], lineno: site[:lineno]
-              )
-            end
-            super(sql)
-          ensure
-            RailsOtelContext::FrameContext.pop if site
+            mod.with_call_site_frame { super(sql) }
           end
         end
 
