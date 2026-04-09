@@ -4,6 +4,7 @@ require_relative 'test_helper'
 require 'ostruct'
 
 class PgAdapterTest < Minitest::Test
+  include CallerLocationHelpers
   include SpanHelpers
 
   def setup
@@ -11,7 +12,33 @@ class PgAdapterTest < Minitest::Test
     RailsOtelContext::Adapters::PG.instance_variable_set(:@patch_module, nil)
   end
 
-  def test_patch_sets_code_location_attributes
+  def test_exec_pushes_frame_context_during_super
+    patch = RailsOtelContext::Adapters::PG.send(:build_patch_module, [:exec])
+    patch.configure(app_root: Dir.pwd)
+
+    captured_frame = nil
+    host_class = Class.new do
+      define_method(:exec) do |_sql|
+        captured_frame = RailsOtelContext::FrameContext.current
+        result = :ok
+        block_given? ? yield(result) : result
+      end
+    end
+    host_class.prepend(patch)
+    host = host_class.new
+
+    with_thread_source('/app/models/checkout.rb', 88, label: 'Checkout#process') do
+      host.exec('select 1')
+      assert_equal 'Checkout', captured_frame[:class_name]
+      assert_equal 'process',  captured_frame[:method_name]
+      assert_equal 'app/models/checkout.rb', captured_frame[:filepath]
+      assert_equal 88, captured_frame[:lineno]
+    end
+  ensure
+    RailsOtelContext::FrameContext.clear!
+  end
+
+  def test_exec_clears_frame_context_after_super
     patch = RailsOtelContext::Adapters::PG.send(:build_patch_module, [:exec])
     patch.configure(app_root: Dir.pwd)
 
@@ -19,28 +46,30 @@ class PgAdapterTest < Minitest::Test
     host_class.prepend(patch)
     host = host_class.new
 
-    with_thread_source('/app/models/checkout.rb', 88) do
-      with_current_span do |span|
-        host.exec('select 1')
-        assert_equal 'app/models/checkout.rb', span.attributes['code.filepath']
-        assert_equal 88, span.attributes['code.lineno']
-      end
+    with_thread_source('/app/models/checkout.rb', 88, label: 'Checkout#process') do
+      host.exec('select 1')
+      assert_nil RailsOtelContext::FrameContext.current,
+                 'FrameContext must be cleared after exec returns'
     end
   end
 
-  def test_patch_skips_attributes_when_source_is_nil
+  def test_exec_skips_frame_context_when_no_source
     patch = RailsOtelContext::Adapters::PG.send(:build_patch_module, [:exec])
     patch.configure(app_root: '/unlikely/root')
 
-    host_class = new_host_class
+    captured_frame = :not_called
+    host_class = Class.new do
+      define_method(:exec) do |_sql|
+        captured_frame = RailsOtelContext::FrameContext.current
+        result = :ok
+        block_given? ? yield(result) : result
+      end
+    end
     host_class.prepend(patch)
     host = host_class.new
 
-    with_current_span do |span|
-      host.exec('select 1')
-      refute span.attributes.key?('code.filepath')
-      refute span.attributes.key?('code.lineno')
-    end
+    host.exec('select 1')
+    assert_nil captured_frame, 'FrameContext must not be set when no source location found'
   end
 
   def test_user_block_is_forwarded_to_result
@@ -52,10 +81,10 @@ class PgAdapterTest < Minitest::Test
     host = host_class.new
 
     yielded = nil
-    with_current_span do
-      host.exec('select 1') { |r| yielded = r }
-    end
+    host.exec('select 1') { |r| yielded = r }
     assert_equal :ok, yielded
+  ensure
+    RailsOtelContext::FrameContext.clear!
   end
 
   private
@@ -66,30 +95,6 @@ class PgAdapterTest < Minitest::Test
         result = :ok
         block_given? ? yield(result) : result
       end
-    end
-  end
-
-  def with_thread_source(path, lineno)
-    thread_singleton = Thread.singleton_class
-    location = OpenStruct.new(absolute_path: File.join(Dir.pwd, path), path: nil, lineno: lineno)
-    had_original = Thread.respond_to?(:each_caller_location)
-
-    if had_original
-      thread_singleton.class_eval do
-        alias_method :__rails_otel_context_original_each_caller_location, :each_caller_location
-      end
-    end
-    thread_singleton.define_method(:each_caller_location) { |&block| block.call(location) }
-
-    yield
-  ensure
-    if had_original
-      thread_singleton.class_eval do
-        alias_method :each_caller_location, :__rails_otel_context_original_each_caller_location
-        remove_method :__rails_otel_context_original_each_caller_location
-      end
-    else
-      thread_singleton.class_eval { remove_method :each_caller_location }
     end
   end
 end

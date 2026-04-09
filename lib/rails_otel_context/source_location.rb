@@ -46,6 +46,22 @@ module RailsOtelContext
       span.set_attribute('code.lineno',    site[:lineno]) if site[:lineno]
     end
 
+    # Wraps a block with the nearest app-code frame pushed into FrameContext.
+    # Used by DB adapters to make the call-site available to
+    # CallContextProcessor#on_start for the child span created inside the block.
+    # Uses with_frame (not push/pop) so nested frames are correctly restored.
+    def with_call_site_frame(&)
+      site = call_site_for_app
+      if site
+        FrameContext.with_frame(
+          class_name: site[:class_name], method_name: site[:method_name],
+          filepath: site[:filepath], lineno: site[:lineno], &
+        )
+      else
+        yield
+      end
+    end
+
     # Legacy helper kept for Redis and ClickHouse adapters that only need filepath + lineno.
     # Migrate those adapters to call_site_for_app + apply_call_site_to_span to remove this.
     def source_location_for_app

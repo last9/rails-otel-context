@@ -27,17 +27,19 @@ module RailsOtelContext
     class << self
       # Pushes +class_name+/+method_name+ for the duration of the block,
       # restoring whatever was pushed before (supports nesting).
-      def with_frame(class_name:, method_name:)
+      # Optional +filepath:+ and +lineno:+ are carried through to the span
+      # processor so DB adapter call-site info survives the span lifecycle.
+      def with_frame(class_name:, method_name:, filepath: nil, lineno: nil)
         prev = Thread.current[FRAME_KEY]
-        Thread.current[FRAME_KEY] = { class_name: class_name, method_name: method_name }.freeze
+        Thread.current[FRAME_KEY] = build_frame(class_name, method_name, filepath, lineno)
         yield
       ensure
         Thread.current[FRAME_KEY] = prev
       end
 
       # Manual push without a block. Caller must call +pop+ in an ensure.
-      def push(class_name:, method_name:)
-        Thread.current[FRAME_KEY] = { class_name: class_name, method_name: method_name }.freeze
+      def push(class_name:, method_name:, filepath: nil, lineno: nil)
+        Thread.current[FRAME_KEY] = build_frame(class_name, method_name, filepath, lineno)
       end
 
       # Clears the pushed frame. Pair with +push+ in an ensure block.
@@ -51,6 +53,15 @@ module RailsOtelContext
       end
 
       alias clear! pop
+
+      private
+
+      def build_frame(class_name, method_name, filepath, lineno)
+        frame = { class_name: class_name, method_name: method_name }
+        frame[:filepath] = filepath if filepath
+        frame[:lineno]   = lineno   if lineno
+        frame.freeze
+      end
     end
   end
 

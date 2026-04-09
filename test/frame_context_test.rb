@@ -44,6 +44,29 @@ class FrameContextTest < Minitest::Test
   end
 
   # ---------------------------------------------------------------------------
+  # with_frame — filepath and lineno
+  # ---------------------------------------------------------------------------
+
+  def test_with_frame_carries_filepath_and_lineno
+    RailsOtelContext::FrameContext.with_frame(
+      class_name: 'OrderService', method_name: 'call',
+      filepath: 'app/services/order_service.rb', lineno: 42
+    ) do
+      frame = RailsOtelContext::FrameContext.current
+      assert_equal 'app/services/order_service.rb', frame[:filepath]
+      assert_equal 42, frame[:lineno]
+    end
+  end
+
+  def test_with_frame_omits_filepath_and_lineno_when_nil
+    RailsOtelContext::FrameContext.with_frame(class_name: 'Foo', method_name: 'bar') do
+      frame = RailsOtelContext::FrameContext.current
+      refute frame.key?(:filepath)
+      refute frame.key?(:lineno)
+    end
+  end
+
+  # ---------------------------------------------------------------------------
   # push / pop — manual API
   # ---------------------------------------------------------------------------
 
@@ -52,6 +75,16 @@ class FrameContextTest < Minitest::Test
     frame = RailsOtelContext::FrameContext.current
     assert_equal 'InvoiceJob', frame[:class_name]
     assert_equal 'perform', frame[:method_name]
+  end
+
+  def test_push_with_filepath_and_lineno
+    RailsOtelContext::FrameContext.push(
+      class_name: 'InvoiceJob', method_name: 'perform',
+      filepath: 'app/jobs/invoice_job.rb', lineno: 15
+    )
+    frame = RailsOtelContext::FrameContext.current
+    assert_equal 'app/jobs/invoice_job.rb', frame[:filepath]
+    assert_equal 15, frame[:lineno]
   end
 
   def test_pop_clears_current

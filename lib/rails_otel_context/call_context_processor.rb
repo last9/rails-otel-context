@@ -82,17 +82,18 @@ module RailsOtelContext
     def apply_call_context(span)
       # Explicit override: app code called FrameContext.with_frame (or Frameable).
       # O(1) — no stack walk. Takes priority over automatic detection.
-      pushed = FrameContext.current
-      if pushed
-        span.set_attribute('code.namespace', pushed[:class_name])
-        span.set_attribute('code.function',  pushed[:method_name]) if pushed[:method_name]
-        return
+      # DB adapters push filepath/lineno too so the child span gets full call-site info.
+      site = FrameContext.current
+      unless site
+        # Default: walk the call stack to find the nearest app-code frame.
+        return unless Thread.respond_to?(:each_caller_location)
+
+        site = call_site_for_app
       end
+      set_call_site_attributes(span, site)
+    end
 
-      # Default: walk the call stack to find the nearest app-code frame.
-      return unless Thread.respond_to?(:each_caller_location)
-
-      site = call_site_for_app
+    def set_call_site_attributes(span, site)
       return unless site
 
       span.set_attribute('code.namespace', site[:class_name])

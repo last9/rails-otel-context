@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.7] - 2026-04-09
+
+### Fixed
+- **DB adapter call-site attributes on wrong span**: Trilogy, PG, and Mysql2 adapters previously called `apply_call_site_to_span(current_span)` _after_ `super()`. Because the OTel instrumentation creates and finishes the child DB span inside `super()`, `current_span` at that point is already the parent — so `code.*` attributes were silently dropped. All three adapters now use `with_call_site_frame { super(...) }`, which pushes the nearest app-code frame into `FrameContext` before the child span starts. `CallContextProcessor#on_start` reads `FrameContext` (O(1)) and applies `code.namespace`, `code.function`, `code.filepath`, and `code.lineno` to the child span correctly. Verified end-to-end in a real Rails app: all 31 DB spans received correct call-site attributes.
+- **`FrameContext.with_frame` / `push` now accept `filepath` and `lineno`**: Previously these keyword args were silently ignored, so adapters passing full call-site data to `FrameContext` only stored `class_name` and `method_name`. The frame hash now includes all four fields and is frozen.
+
 ## [0.9.6] - 2026-04-07
 
 ### Added
