@@ -233,13 +233,25 @@ class CallContextProcessorTest < Minitest::Test
     assert_equal 'create', span.attributes['code.function']
   end
 
-  def test_pushed_frame_does_not_set_lineno_or_filepath
+  def test_pushed_frame_without_filepath_does_not_set_lineno_or_filepath
     span = FakeSpan.new
     RailsOtelContext::FrameContext.with_frame(class_name: 'OrdersController', method_name: 'index') do
       @processor.on_start(span, nil)
     end
     refute span.attributes.key?('code.lineno')
     refute span.attributes.key?('code.filepath')
+  end
+
+  def test_pushed_frame_with_filepath_sets_lineno_and_filepath
+    span = FakeSpan.new
+    RailsOtelContext::FrameContext.with_frame(
+      class_name: 'OrdersController', method_name: 'index',
+      filepath: 'app/controllers/orders_controller.rb', lineno: 15
+    ) do
+      @processor.on_start(span, nil)
+    end
+    assert_equal 'app/controllers/orders_controller.rb', span.attributes['code.filepath']
+    assert_equal 15, span.attributes['code.lineno']
   end
 
   def test_stack_walk_used_when_no_frame_pushed

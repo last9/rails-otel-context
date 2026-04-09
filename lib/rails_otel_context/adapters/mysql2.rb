@@ -32,12 +32,20 @@ module RailsOtelContext
             end
           end
 
-          # AR context and span renaming handled by CallContextProcessor.apply_db_context.
+          # Push call-site into FrameContext BEFORE super so the OTel child span
+          # created inside super picks it up via CallContextProcessor#on_start.
           %i[query prepare].each do |method_name|
             define_method(method_name) do |*args|
-              result = super(*args)
-              mod.apply_call_site_to_span(OpenTelemetry::Trace.current_span, mod.call_site_for_app)
-              result
+              site = mod.call_site_for_app
+              if site
+                RailsOtelContext::FrameContext.push(
+                  class_name: site[:class_name], method_name: site[:method_name],
+                  filepath: site[:filepath], lineno: site[:lineno]
+                )
+              end
+              super(*args)
+            ensure
+              RailsOtelContext::FrameContext.pop if site
             end
           end
         end
