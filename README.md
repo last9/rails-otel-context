@@ -237,6 +237,70 @@ Redis and ClickHouse spans get the same `code.*` attributes pointing to the app-
 }
 ```
 
+### ClickHouse span naming
+
+ClickHouse spans follow the OTel DB convention: `"{VERB} {table}"`. No configuration required — this happens automatically when the ClickHouse adapter is active.
+
+| Query | Span name |
+|---|---|
+| `SELECT * FROM events` | `SELECT events` |
+| `INSERT INTO analytics.page_views ...` | `INSERT page_views` |
+| `OPTIMIZE TABLE logs` | `OPTIMIZE clickhouse` (no FROM — falls back gracefully) |
+
+Schema-qualified tables (`db.table`) are supported: `db.name` gets the schema, `db.sql.table` gets the bare table name.
+
+If you've configured a `span_name_formatter`, it runs on ClickHouse spans too — same formatter, no extra wiring. The original OTel name is preserved in `l9.orig.name`.
+
+## Capturing request and response bodies
+
+`BodyCapture` is a Rack middleware that attaches request and response bodies to the active OTel span. It's opt-in — add it to your middleware stack:
+
+```ruby
+# config/application.rb (or an initializer, after OTel is configured)
+config.middleware.use RailsOtelContext::BodyCapture
+```
+
+That's the zero-config path. Bodies land on `http.request.body` and `http.response.body`, capped at 8 KB, for `application/json`, `application/xml`, and `text/plain` content types. `/health`, `/ready`, and `/metrics` are excluded by default.
+
+The option that matters most in production:
+
+```ruby
+config.middleware.use RailsOtelContext::BodyCapture, on_error_only: true
+```
+
+With `on_error_only: true`, the response body is never buffered on the success path — zero overhead for 2xx. Bodies are only captured when status >= 400, which is exactly when you need them.
+
+Full options:
+
+| Option | Default | Description |
+|---|---|---|
+| `on_error_only:` | `false` | Capture only on 4xx/5xx |
+| `max_bytes:` | `8192` | Truncate bodies above this size |
+| `content_types:` | `%w[application/json application/xml text/plain]` | Allowlist |
+| `include_paths:` | `nil` | Restrict capture to these path prefixes |
+| `exclude_paths:` | `%w[/health /ready /metrics]` | Skip these path prefixes |
+
+## Connection pool tracing
+
+When you're chasing timeouts or thread starvation, knowing that `checkout` spent 200ms waiting for a connection is the difference between guessing and knowing. Enable it:
+
+```ruby
+RailsOtelContext.configure do |c|
+  c.connection_pool_tracing_enabled = true
+end
+```
+
+Each `checkout` call gets its own span with pool state at the moment of acquisition:
+
+| Attribute | Description |
+|---|---|
+| `db.pool.size` | Total pool capacity |
+| `db.pool.busy` | Connections currently checked out |
+| `db.pool.idle` | Connections available |
+| `db.pool.waiting` | Threads queued waiting for a connection |
+
+Spans inside transactions and `with_connection` blocks are skipped — a pinned connection is already held, so there's nothing to measure.
+
 ## Performance
 
 `CallContextProcessor#on_start` fires for every span. For a typical 10–20 span request the overhead is in the low-microsecond range and does not require configuration.
