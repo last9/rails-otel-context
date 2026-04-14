@@ -12,7 +12,7 @@ module RailsOtelContext
   #    Relation#exec_queries. This handles lazy scopes like
   #    Transaction.recent_completed.to_a where the scope method returns before
   #    SQL fires.
-  module ActiveRecordContext
+  module ActiveRecordContext # rubocop:disable Metrics/ModuleLength
     THREAD_KEY              = :_rails_otel_ctx_ar
     SCOPE_THREAD_KEY        = :_rails_otel_ctx_scope
     PENDING_PREPARE_KEY     = :_rails_otel_ctx_pending_prepare_spans
@@ -125,7 +125,7 @@ module RailsOtelContext
       def finish(_name, _id, _payload)
       ensure
         Thread.current[THREAD_KEY] = nil
-        Thread.current[PENDING_PREPARE_KEY] = nil   # clear any leftovers from skipped notifications
+        Thread.current[PENDING_PREPARE_KEY] = nil # clear any leftovers from skipped notifications
       end
     end
 
@@ -220,7 +220,7 @@ module RailsOtelContext
       formatter = RailsOtelContext.configuration.span_name_formatter
       return unless formatter && span.respond_to?(:name) && attrs.key?('db.system')
 
-      ar_ctx             = ctx.dup
+      ar_ctx = ctx.dup
       ar_ctx[:code_namespace] = attrs['code.namespace']
       ar_ctx[:code_function]  = attrs['code.function']
 

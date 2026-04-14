@@ -20,11 +20,11 @@ class FakePoolSpan
     @attributes[key] = value
   end
 
-  def record_exception(_e)
+  def record_exception(_err)
     @exception_recorded = true
   end
 
-  def status=(_s); end
+  def status=(_status); end
 
   def finish
     @finished = true
@@ -44,7 +44,7 @@ class FakePoolTracer
     result = yield span
     span.finish
     result
-  rescue => e
+  rescue StandardError => e
     span.record_exception(e)
     span.finish
     raise

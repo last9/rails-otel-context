@@ -25,7 +25,7 @@ module RailsOtelContext
     private_constant :DEFAULT_CONTENT_TYPES, :DEFAULT_EXCLUDE_PATHS,
                      :DEFAULT_MAX_BYTES, :TRUNCATED_SUFFIX
 
-    def initialize(app,
+    def initialize(app, # rubocop:disable Metrics/ParameterLists
                    capture_request:  true,
                    capture_response: true,
                    max_bytes:        DEFAULT_MAX_BYTES,
@@ -92,8 +92,7 @@ module RailsOtelContext
     end
 
     def drain_response(body, headers)
-      chunks = []
-      body.each { |chunk| chunks << chunk }
+      chunks = body.map { |chunk| chunk }
       body.close if body.respond_to?(:close)
 
       content_type = headers['Content-Type'] || headers['content-type']

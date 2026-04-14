@@ -29,7 +29,7 @@ class ClickhouseAdapterTest < Minitest::Test
         assert_equal :ok, result
         assert_equal 1, calls.size
         span = calls[0]
-        assert_equal 'SELECT clickhouse', span[:name]   # sql verb extracted, no FROM table
+        assert_equal 'SELECT clickhouse', span[:name] # sql verb extracted, no FROM table
         assert_equal :client, span[:kind]
         assert_equal 'clickhouse', span[:attributes]['db.system']
         assert_equal 'SELECT', span[:attributes]['db.operation']

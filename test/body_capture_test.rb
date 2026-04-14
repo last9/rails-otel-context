@@ -13,15 +13,15 @@ class BodyCaptureTest < Minitest::Test
   # like a real request body stream.
   def make_env(path: '/', content_type: nil, body: nil)
     {
-      'PATH_INFO'    => path,
+      'PATH_INFO' => path,
       'CONTENT_TYPE' => content_type || '',
-      'rack.input'   => StringIO.new(body || '')
+      'rack.input' => StringIO.new(body || '')
     }
   end
 
   # Builds a minimal downstream Rack app that returns a fixed response.
   def make_app(status: 200, body: [''], content_type: 'application/json')
-    ->(env) { [status, { 'Content-Type' => content_type }, body] }
+    ->(_env) { [status, { 'Content-Type' => content_type }, body] }
   end
 
   def middleware(**opts)
@@ -45,7 +45,7 @@ class BodyCaptureTest < Minitest::Test
 
   def test_request_body_remains_readable_by_downstream_app
     read_by_app = nil
-    app = ->(env) do
+    app = lambda do |env|
       read_by_app = env['rack.input'].read
       [200, { 'Content-Type' => 'application/json' }, ['{}']]
     end
@@ -100,8 +100,7 @@ class BodyCaptureTest < Minitest::Test
 
     with_current_span do |_span|
       _, _, body = mw.call(make_env)
-      chunks = []
-      body.each { |c| chunks << c }
+      chunks = body.map { |c| c }
       result = chunks.join
     end
 
@@ -157,8 +156,8 @@ class BodyCaptureTest < Minitest::Test
   def test_include_paths_restricts_capture_to_matching_prefix
     mw = RailsOtelContext::BodyCapture.new(
       make_app(body: ['{}'], content_type: 'application/json'),
-      include_paths:  ['/api'],
-      exclude_paths:  []
+      include_paths: ['/api'],
+      exclude_paths: []
     )
 
     with_current_span do |span|
