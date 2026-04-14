@@ -29,16 +29,39 @@ class ClickhouseAdapterTest < Minitest::Test
         assert_equal :ok, result
         assert_equal 1, calls.size
         span = calls[0]
-        assert_equal 'QUERY clickhouse', span[:name]
+        assert_equal 'SELECT clickhouse', span[:name] # sql verb extracted, no FROM table
         assert_equal :client, span[:kind]
         assert_equal 'clickhouse', span[:attributes]['db.system']
-        assert_equal 'QUERY', span[:attributes]['db.operation']
+        assert_equal 'SELECT', span[:attributes]['db.operation']
         assert_equal 'SELECT 1', span[:attributes]['db.statement']
         assert_equal 'WarehouseService', span[:attributes]['code.namespace']
         assert_equal 'load',                         span[:attributes]['code.function']
         assert_equal 'app/services/warehouse.rb',    span[:attributes]['code.filepath']
         assert_equal 14,                             span[:attributes]['code.lineno']
       end
+    end
+  end
+
+  # click_house gem v2.x uses select_all / select_one / select_value instead of query/select.
+  # Verify the alias map normalises SELECT_ALL → SELECT so span names stay readable.
+  def test_select_all_normalized_to_select_verb
+    with_thread_source('/app/services/warehouse.rb', 22, label: 'WarehouseService#fetch') do
+      with_tracer_spy do |calls|
+        select_all_client.select_all('SELECT name FROM system.tables LIMIT 5')
+        span = calls[0]
+        assert_equal 'SELECT tables', span[:name]
+        assert_equal 'clickhouse',    span[:attributes]['db.system']
+        assert_equal 'SELECT',        span[:attributes]['db.operation']
+      end
+    end
+  end
+
+  def test_select_all_no_table_falls_back_to_select_clickhouse
+    with_tracer_spy do |calls|
+      select_all_client.select_all('SELECT 1')
+      span = calls[0]
+      assert_equal 'SELECT clickhouse', span[:name]
+      assert_equal 'SELECT',            span[:attributes]['db.operation']
     end
   end
 
@@ -62,6 +85,14 @@ class ClickhouseAdapterTest < Minitest::Test
   end
 
   private
+
+  def select_all_client(app_root: Dir.pwd)
+    patch = RailsOtelContext::Adapters::Clickhouse.send(:build_patch_module, [:select_all])
+    patch.configure(app_root: app_root)
+    klass = Class.new { def select_all(_sql) = [] }
+    klass.prepend(patch)
+    klass.new
+  end
 
   def with_tracer_spy
     calls = []

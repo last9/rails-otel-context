@@ -14,6 +14,7 @@ require 'rails_otel_context/adapters'
 require 'rails_otel_context/request_context'
 require 'rails_otel_context/frame_context'
 require 'rails_otel_context/call_context_processor'
+require 'rails_otel_context/body_capture'
 require 'rails_otel_context/railtie' if defined?(Rails::Railtie)
 
 module RailsOtelContext

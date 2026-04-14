@@ -52,8 +52,14 @@ module RailsOtelContext
     end
 
     def on_finish(span)
+      return unless span.respond_to?(:attributes)
+
+      attrs = span.attributes
+      return unless attrs&.key?('db.system')
+
+      stash_if_prepare_span(span, attrs)
+
       return unless @slow_query_threshold_ms
-      return unless span.respond_to?(:attributes) && span.attributes&.key?('db.system')
 
       start_ns = span.start_timestamp
       end_ns   = span.end_timestamp
@@ -65,8 +71,8 @@ module RailsOtelContext
       # span.recording? is false here — the span has finished and current_span
       # has reverted to the HTTP parent. Write directly to the backing attributes
       # hash so db.slow lands on the actual DB span, not the HTTP parent.
-      attrs = span.instance_variable_get(:@attributes)
-      attrs.store(ActiveRecordContext::DB_SLOW_ATTR, true) if attrs.respond_to?(:store)
+      raw_attrs = span.instance_variable_get(:@attributes)
+      raw_attrs.store(ActiveRecordContext::DB_SLOW_ATTR, true) if raw_attrs.respond_to?(:store)
     rescue StandardError
       nil
     end
@@ -78,6 +84,17 @@ module RailsOtelContext
     def shutdown(**) = 0
 
     private
+
+    # Stash PREPARE spans so Subscriber#start can retroactively apply AR context
+    # once the enclosing sql.active_record notification fires. PG's prepared-statement
+    # flow runs PREPARE → EXECUTE as separate wire operations; the PREPARE span
+    # finishes before the notification, so on_start never sees AR context for it.
+    def stash_if_prepare_span(span, attrs)
+      return unless attrs['db.operation'] == 'PREPARE'
+      return if attrs.key?('code.activerecord.model')
+
+      ActiveRecordContext.stash_prepare_span(span)
+    end
 
     def apply_call_context(span)
       # Explicit override: app code called FrameContext.with_frame (or Frameable).

@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.8] - 2026-04-14
+
+### Added
+- **ClickHouse adapter v2.x support**: Expanded `CANDIDATE_METHODS` to include `select_all`, `select_one`, `select_value`, `insert_compact`, and `insert_rows` — the method names introduced in `click_house` gem v2.x. Previously only `execute`/`insert`/`query`/`select` were patched, so v2 queries appeared as plain Faraday HTTP spans with no `db.system` attribute. Added `METHOD_OP_ALIAS` map to normalise compound names (`SELECT_ALL → SELECT`, `INSERT_COMPACT → INSERT`) for readable `db.operation` values and span names.
+- **ClickHouse span naming — OTel DB convention**: Added `span_name_for` and `parse_table` helpers. Spans are now named `"{VERB} {table}"` (e.g. `SELECT tables`, `INSERT events`) following the OpenTelemetry DB semantic conventions. `parse_table` supports schema-qualified names (`db.table → [db, table]`). The `table_name:` keyword on `span_name_for` avoids a double regex scan when the caller already holds the parsed table.
+- **ClickHouse `span_name_formatter` integration**: ClickHouse spans now run the configured `span_name_formatter` inline (with a synthetic AR-shaped context built from `code.namespace`/`code.function`) so they get the same custom display names as ActiveRecord spans.
+- **PREPARE span AR context enrichment (PostgreSQL)**: PG's prepared-statement flow emits a `PREPARE` wire operation before `EXECUTE`. The PREPARE span finishes before `sql.active_record` fires, so `on_start` never sees AR context. `CallContextProcessor#on_finish` now stashes PREPARE spans (those with `db.operation: PREPARE` and no `code.activerecord.model`) via `ActiveRecordContext.stash_prepare_span`. When `Subscriber#start` fires for the enclosing notification, it retroactively applies AR context to stashed spans via direct `@attributes` mutation (since `span.recording?` is false for finished spans, `set_attribute` would be a no-op).
+- **`BodyCapture` Rack middleware**: New `RailsOtelContext::BodyCapture` middleware captures request and response bodies onto the active OTel span as `http.request.body` / `http.response.body`. Supports `on_error_only:`, `max_bytes:`, `content_types:`, `include_paths:`, and `exclude_paths:` options. On the success path with `on_error_only: true`, the response body is never buffered — zero overhead.
+- **`ConnectionPool` checkout tracing**: New `RailsOtelContext::Adapters::ConnectionPool` adapter (opt-in via `config.connection_pool_tracing_enabled = true`) wraps `ActiveRecord::ConnectionAdapters::ConnectionPool#checkout` in an OTel span with `db.pool.size`, `db.pool.busy`, `db.pool.idle`, and `db.pool.waiting` attributes. Skips span creation when a pinned connection is already held (transactions, `with_connection` blocks).
+
 ## [0.9.7] - 2026-04-09
 
 ### Fixed

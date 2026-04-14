@@ -12,11 +12,12 @@ module RailsOtelContext
   #    Relation#exec_queries. This handles lazy scopes like
   #    Transaction.recent_completed.to_a where the scope method returns before
   #    SQL fires.
-  module ActiveRecordContext
-    THREAD_KEY       = :_rails_otel_ctx_ar
-    SCOPE_THREAD_KEY = :_rails_otel_ctx_scope
-    DB_SLOW_ATTR     = 'db.slow'
-    private_constant :THREAD_KEY, :SCOPE_THREAD_KEY
+  module ActiveRecordContext # rubocop:disable Metrics/ModuleLength
+    THREAD_KEY              = :_rails_otel_ctx_ar
+    SCOPE_THREAD_KEY        = :_rails_otel_ctx_scope
+    PENDING_PREPARE_KEY     = :_rails_otel_ctx_pending_prepare_spans
+    DB_SLOW_ATTR            = 'db.slow'
+    private_constant :THREAD_KEY, :SCOPE_THREAD_KEY, :PENDING_PREPARE_KEY
 
     # Frozen regex — only the verb regex remains; table extraction uses index+slice.
     SQL_VERB_RE = /\A(\w+)/i
@@ -102,18 +103,29 @@ module RailsOtelContext
         ctx[:async] = true if payload[:async]
         Thread.current[THREAD_KEY] = ctx
 
+        return unless defined?(OpenTelemetry::Trace)
+
         # Enrich the current span directly. When OTel instruments via driver-level
         # prepend (Trilogy, PG, Mysql2), the span is created BEFORE this notification
         # fires, so CallContextProcessor#on_start sees nil AR context. Applying here
         # fixes those spans after the fact.
-        return unless defined?(OpenTelemetry::Trace)
-
         ActiveRecordContext.apply_to_span(OpenTelemetry::Trace.current_span, ctx)
+
+        # Retroactively enrich any PREPARE spans that finished before this notification
+        # fired. PG's prepared-statement flow sends PREPARE then EXECUTE as separate wire
+        # operations; the PREPARE span finishes before sql.active_record starts, so it
+        # never sees AR context. CallContextProcessor#on_finish stashes those spans here.
+        pending = Thread.current[PENDING_PREPARE_KEY]
+        return unless pending
+
+        pending.each { |s| ActiveRecordContext.retroactively_apply_to_span(s, ctx) }
+        Thread.current[PENDING_PREPARE_KEY] = nil
       end
 
       def finish(_name, _id, _payload)
       ensure
         Thread.current[THREAD_KEY] = nil
+        Thread.current[PENDING_PREPARE_KEY] = nil # clear any leftovers from skipped notifications
       end
     end
 
@@ -173,8 +185,16 @@ module RailsOtelContext
     end
 
     def clear!
-      Thread.current[THREAD_KEY]       = nil
-      Thread.current[SCOPE_THREAD_KEY] = nil
+      Thread.current[THREAD_KEY]          = nil
+      Thread.current[SCOPE_THREAD_KEY]    = nil
+      Thread.current[PENDING_PREPARE_KEY] = nil
+    end
+
+    # Called from CallContextProcessor#on_finish when a PREPARE span finishes
+    # before its sql.active_record notification. Stashed spans are flushed by
+    # Subscriber#start when the notification fires.
+    def stash_prepare_span(span)
+      (Thread.current[PENDING_PREPARE_KEY] ||= []) << span
     end
 
     # Test helpers: set AR context directly for unit tests.
@@ -184,6 +204,34 @@ module RailsOtelContext
 
     def stub_scope(scope_name)
       Thread.current[SCOPE_THREAD_KEY] = scope_name
+    end
+
+    # Retroactively applies AR context to a finished span (e.g. PREPARE spans that
+    # finished before sql.active_record fired). Uses direct @attributes mutation
+    # because span.recording? is false — set_attribute would be a no-op.
+    def retroactively_apply_to_span(span, ctx)
+      attrs = span.instance_variable_get(:@attributes)
+      return unless attrs.respond_to?(:store)
+
+      attrs.store(AR_MODEL_ATTR,  ctx[:model_name])  if ctx[:model_name]
+      attrs.store(AR_METHOD_ATTR, ctx[:method_name]) if ctx[:method_name]
+      attrs.store(AR_SCOPE_ATTR,  ctx[:scope_name])  if ctx[:scope_name]
+
+      formatter = RailsOtelContext.configuration.span_name_formatter
+      return unless formatter && span.respond_to?(:name) && attrs.key?('db.system')
+
+      ar_ctx = ctx.dup
+      ar_ctx[:code_namespace] = attrs['code.namespace']
+      ar_ctx[:code_function]  = attrs['code.function']
+
+      original_name = span.name
+      new_name = formatter.call(original_name, ar_ctx)
+      return unless new_name && new_name != original_name
+
+      attrs.store(ORIG_NAME_ATTR, original_name)
+      span.instance_variable_set(:@name, new_name)
+    rescue StandardError
+      nil
     end
 
     # Applies AR context directly to a span. Used by Subscriber#start to enrich spans

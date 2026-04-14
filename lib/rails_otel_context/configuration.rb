@@ -4,6 +4,7 @@ module RailsOtelContext
   class Configuration
     attr_accessor :redis_source_enabled,
                   :clickhouse_enabled,
+                  :connection_pool_tracing_enabled,
                   :span_name_formatter,
                   :slow_query_threshold_ms
 
@@ -16,6 +17,7 @@ module RailsOtelContext
     def initialize
       @redis_source_enabled = false
       @clickhouse_enabled = true
+      @connection_pool_tracing_enabled = false
       @span_name_formatter = nil
       @custom_span_attributes = nil
       @request_context_enabled = false
