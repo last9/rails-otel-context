@@ -5,6 +5,7 @@ require 'rails_otel_context/adapters/mysql2'
 require 'rails_otel_context/adapters/trilogy'
 require 'rails_otel_context/adapters/redis'
 require 'rails_otel_context/adapters/clickhouse'
+require 'rails_otel_context/adapters/connection_pool'
 
 module RailsOtelContext
   module Adapters
@@ -16,6 +17,7 @@ module RailsOtelContext
       Trilogy.install!(app_root: app_root)
       Redis.install!(app_root: app_root) if config.redis_source_enabled
       Clickhouse.install!(app_root: app_root) if config.clickhouse_enabled
+      ConnectionPool.install! if config.connection_pool_tracing_enabled
     end
   end
 end
