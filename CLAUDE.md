@@ -18,6 +18,16 @@ Always reproduce first — write a failing test before touching code.
 Run the new test against pre-fix code to confirm it fails, then apply fix and
 confirm it passes. Never commit a fix without a reproducing test.
 
+## ClickHouse adapter rules
+- `CANDIDATE_METHODS` must not include methods that delegate entirely to another
+  candidate (e.g. `insert`/`insert_rows`/`insert_compact` all call `execute` — only
+  `execute` belongs in the list). Wrapping delegators adds fragile patches that break
+  when the gem changes keyword-argument signatures.
+- Tests for ClickHouse adapter changes must cover: span name, `db.operation`,
+  `db.system`, and kwarg forwarding where the patched method uses keyword args.
+- `build_patch_module` must always use `|*args, **kwargs, &block|` and
+  `super(*args, **kwargs, &block)` — never drop the `**kwargs` splat.
+
 ## Key invariants
 - `span_name_formatter` must only run on DB spans (`db.system` attribute present).
   Never rename HTTP, controller, job, or custom spans.
