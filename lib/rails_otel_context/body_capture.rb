@@ -92,7 +92,8 @@ module RailsOtelContext
     end
 
     def drain_response(body, headers)
-      chunks = body.map { |chunk| chunk }
+      chunks = []
+      body.each { |chunk| chunks << chunk }
       body.close if body.respond_to?(:close)
 
       content_type = headers['Content-Type'] || headers['content-type']
