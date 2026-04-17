@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.9] - 2026-04-17
+
+### Fixed
+- **ClickHouse adapter: `insert_rows`/`insert_compact` `ArgumentError` (issue #28)**: `insert_rows(table, body, format: nil)` and `insert_compact` use keyword arguments. The patch module's `define_method` wrapper only captured `*args`, so the `format:` keyword was passed as a stray positional Hash and then forwarded as a third positional argument — raising `ArgumentError: wrong number of arguments (given 3, expected 2)` in production.
+- **Reduced monkey-patch surface**: Removed `insert`, `insert_rows`, and `insert_compact` from `CANDIDATE_METHODS`. In click_house v2.x all three delegate to `execute` internally, so patching `execute` alone is sufficient. This eliminates three fragile wraps of methods whose internal keyword-argument signatures may change across gem versions.
+- **`**kwargs` forwarding**: `build_patch_module` now uses `|*args, **kwargs, &block|` and `super(*args, **kwargs, &block)` throughout — making the wrapper transparent to any method signature that mixes positional and keyword arguments.
+
 ## [0.9.8] - 2026-04-14
 
 ### Added

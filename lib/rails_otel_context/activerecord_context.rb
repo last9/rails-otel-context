@@ -213,9 +213,9 @@ module RailsOtelContext
       attrs = span.instance_variable_get(:@attributes)
       return unless attrs.respond_to?(:store)
 
-      attrs.store(AR_MODEL_ATTR,  ctx[:model_name])  if ctx[:model_name]
-      attrs.store(AR_METHOD_ATTR, ctx[:method_name]) if ctx[:method_name]
-      attrs.store(AR_SCOPE_ATTR,  ctx[:scope_name])  if ctx[:scope_name]
+      attrs.store('code.activerecord.model',  ctx[:model_name])  if ctx[:model_name]
+      attrs.store('code.activerecord.method', ctx[:method_name]) if ctx[:method_name]
+      attrs.store('code.activerecord.scope',  ctx[:scope_name])  if ctx[:scope_name]
 
       formatter = RailsOtelContext.configuration.span_name_formatter
       return unless formatter && span.respond_to?(:name) && attrs.key?('db.system')
@@ -228,7 +228,7 @@ module RailsOtelContext
       new_name = formatter.call(original_name, ar_ctx)
       return unless new_name && new_name != original_name
 
-      attrs.store(ORIG_NAME_ATTR, original_name)
+      attrs.store('l9.orig.name', original_name)
       span.instance_variable_set(:@name, new_name)
     rescue StandardError
       nil

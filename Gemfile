@@ -11,5 +11,6 @@ group :development, :test do
   gem 'minitest', '~> 5.0'
   gem 'rake', '~> 13.0'
   gem 'rubocop', '~> 1.21'
+  gem 'simplecov', require: false
   gem 'stackprof'
 end

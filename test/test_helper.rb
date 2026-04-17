@@ -1,7 +1,18 @@
 # frozen_string_literal: true
 
+if ENV['COVERAGE']
+  require 'simplecov'
+  SimpleCov.start do
+    add_filter '/test/'
+    add_filter '/bench/'
+    track_files 'lib/**/*.rb'
+  end
+end
+
 require 'minitest/autorun'
+require 'minitest/mock'
 require 'opentelemetry-api'
+require 'ostruct'
 require 'logger'
 
 # Allow tests to run without Rails

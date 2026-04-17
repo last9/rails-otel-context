@@ -778,6 +778,59 @@ class ActiveRecordContextTest < Minitest::Test
     RailsOtelContext.reset_configuration!
   end
 
+  # ── PREPARE span stashing and retroactive enrichment ─────────────────────
+
+  PENDING_PREPARE_THREAD_KEY = :_rails_otel_ctx_pending_prepare_spans
+
+  def test_stash_prepare_span_adds_to_pending_list
+    span = FakeSpan.new
+    RailsOtelContext::ActiveRecordContext.stash_prepare_span(span)
+    pending = Thread.current[PENDING_PREPARE_THREAD_KEY]
+    assert_includes pending, span
+  ensure
+    Thread.current[PENDING_PREPARE_THREAD_KEY] = nil
+  end
+
+  def test_stash_prepare_span_accumulates_multiple_spans
+    s1 = FakeSpan.new
+    s2 = FakeSpan.new
+    RailsOtelContext::ActiveRecordContext.stash_prepare_span(s1)
+    RailsOtelContext::ActiveRecordContext.stash_prepare_span(s2)
+    pending = Thread.current[PENDING_PREPARE_THREAD_KEY]
+    assert_equal [s1, s2], pending
+  ensure
+    Thread.current[PENDING_PREPARE_THREAD_KEY] = nil
+  end
+
+  def test_retroactively_apply_to_span_sets_ar_attributes
+    span = FakeSpan.new
+    ctx  = { model_name: 'Order', method_name: 'find', scope_name: nil }
+    RailsOtelContext::ActiveRecordContext.retroactively_apply_to_span(span, ctx)
+    assert_equal 'Order', span.attributes[RailsOtelContext::CallContextProcessor::AR_MODEL_ATTR]
+    assert_equal 'find',  span.attributes[RailsOtelContext::CallContextProcessor::AR_METHOD_ATTR]
+  end
+
+  def test_retroactively_apply_to_span_renames_span_via_formatter
+    span = FakeSpan.new
+    span.name = 'SELECT orders'
+    span.set_attribute('db.system', 'mysql')
+    RailsOtelContext.configure do |c|
+      c.span_name_formatter = ->(_, ctx) { "#{ctx[:model_name]}.#{ctx[:method_name]}" }
+    end
+    ctx = { model_name: 'Order', method_name: 'recent', scope_name: nil }
+    RailsOtelContext::ActiveRecordContext.retroactively_apply_to_span(span, ctx)
+    assert_equal 'Order.recent', span.name
+  ensure
+    RailsOtelContext.reset_configuration!
+  end
+
+  def test_retroactively_apply_to_span_is_noop_when_attrs_not_storable
+    span = FakeSpan.new
+    span.instance_variable_get(:@attributes).freeze
+    ctx = { model_name: 'Order', method_name: 'find', scope_name: nil }
+    assert_silent { RailsOtelContext::ActiveRecordContext.retroactively_apply_to_span(span, ctx) }
+  end
+
   private
 
   def with_ar_table_map(map)
@@ -790,7 +843,6 @@ class ActiveRecordContextTest < Minitest::Test
   # Temporarily replaces AR::Base.descendants with a controlled list so
   # ar_table_model_map builds from exactly those classes, then resets the cache.
   def allow_real_descendants(list)
-    # Ensure AR::Base exists (test env may only have AR::Relation)
     unless defined?(ActiveRecord::Base)
       ActiveRecord.const_set(:Base, Class.new)
     end

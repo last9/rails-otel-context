@@ -565,6 +565,34 @@ class CallContextProcessorTest < Minitest::Test
     end
   end
 
+  def test_on_finish_with_nil_start_timestamp_does_not_set_slow
+    with_slow_query_threshold(100) do
+      span = FakeSpan.new(start_timestamp: nil, end_timestamp: 1_000_000_000)
+      span.set_attribute('db.system', 'mysql')
+      @processor.on_finish(span)
+      refute span.attributes.key?('db.slow')
+    end
+  end
+
+  def test_on_finish_with_nil_end_timestamp_does_not_set_slow
+    with_slow_query_threshold(100) do
+      span = FakeSpan.new(start_timestamp: 1_000_000_000, end_timestamp: nil)
+      span.set_attribute('db.system', 'mysql')
+      @processor.on_finish(span)
+      refute span.attributes.key?('db.slow')
+    end
+  end
+
+  def test_on_finish_rescues_standard_error_silently
+    with_slow_query_threshold(10) do
+      span = FakeSpan.new(start_timestamp: 0, end_timestamp: 1_000_000_000_000)
+      span.set_attribute('db.system', 'mysql')
+      # Freeze attributes so the raw_attrs.store raises FrozenError (< StandardError)
+      span.instance_variable_get(:@attributes).freeze
+      assert_silent { @processor.on_finish(span) }
+    end
+  end
+
   def test_force_flush_returns_success
     assert_kind_of Integer, @processor.force_flush
   end

@@ -7,9 +7,12 @@ module RailsOtelContext
 
       # click_house gem v1.x used :query/:select; v2.x uses :select_all/:select_one/:select_value.
       # We list all known variants so install! picks whichever the loaded gem version defines.
+      #
+      # insert/insert_rows/insert_compact are intentionally absent: in v2.x they all delegate
+      # to execute, so patching execute alone is sufficient and avoids wrapping methods whose
+      # keyword-argument signatures may differ across gem versions.
       CANDIDATE_METHODS = %i[
         select_all select_one select_value
-        insert insert_compact insert_rows
         execute command
         query select
       ].freeze
@@ -51,13 +54,11 @@ module RailsOtelContext
       end
 
       # Maps compound gem method names to their SQL verb for span naming.
-      # select_all/select_one/select_value → SELECT; insert_* → INSERT.
+      # select_all/select_one/select_value → SELECT.
       METHOD_OP_ALIAS = {
         'SELECT_ALL' => 'SELECT',
         'SELECT_ONE' => 'SELECT',
-        'SELECT_VALUE' => 'SELECT',
-        'INSERT_COMPACT' => 'INSERT',
-        'INSERT_ROWS' => 'INSERT'
+        'SELECT_VALUE' => 'SELECT'
       }.freeze
 
       # Derives a human-readable span name from the SQL statement.
@@ -115,55 +116,56 @@ module RailsOtelContext
                         .fetch(method_name.to_s.upcase, method_name.to_s.upcase)
                         .freeze
 
-            define_method(method_name) do |*args, &block|
-              return super(*args, &block) if Thread.current[reentrancy_key]
+            define_method(method_name) do |*args, **kwargs, &block|
+              return super(*args, **kwargs, &block) if Thread.current[reentrancy_key]
 
-              site      = mod.call_site_for_app
-              statement = args.first.is_a?(String) ? args.first : nil
-
-              # Parse table once — span_name_for accepts the pre-parsed value to skip
-              # the internal regex scan, and we reuse db_name for db.name attribute.
-              db_name, table_name = RailsOtelContext::Adapters::Clickhouse.parse_table(statement)
-              sql_verb  = statement ? statement.lstrip.split(/\s/, 2).first&.upcase || method_op : method_op
-              span_name = RailsOtelContext::Adapters::Clickhouse.span_name_for(
-                statement, method_op, table_name: table_name
-              )
-
-              tracer = OpenTelemetry.tracer_provider.tracer('rails-otel-context-clickhouse')
               Thread.current[reentrancy_key] = true
+              begin
+                site      = mod.call_site_for_app
+                statement = args.first.is_a?(String) ? args.first : nil
 
-              tracer.in_span(span_name, kind: :client) do |span|
-                span.set_attribute('db.system',    'clickhouse')
-                span.set_attribute('db.operation', sql_verb)
-                span.set_attribute('db.statement', statement)   if statement
-                span.set_attribute('db.name',      db_name)     if db_name
-                span.set_attribute('db.sql.table', table_name)  if table_name
+                # Avoid a second regex scan: pass pre-parsed table_name to span_name_for,
+                # and reuse db_name for the db.name attribute.
+                db_name, table_name = RailsOtelContext::Adapters::Clickhouse.parse_table(statement)
+                sql_verb  = statement ? statement.lstrip.split(/\s/, 2).first&.upcase || method_op : method_op
+                span_name = RailsOtelContext::Adapters::Clickhouse.span_name_for(
+                  statement, method_op, table_name: table_name
+                )
 
-                result = super(*args, &block)
-                mod.apply_call_site_to_span(span, site)
+                tracer = OpenTelemetry.tracer_provider.tracer('rails-otel-context-clickhouse')
+                tracer.in_span(span_name, kind: :client) do |span|
+                  span.set_attribute('db.system',    'clickhouse')
+                  span.set_attribute('db.operation', sql_verb)
+                  span.set_attribute('db.statement', statement)   if statement
+                  span.set_attribute('db.name',      db_name)     if db_name
+                  span.set_attribute('db.sql.table', table_name)  if table_name
 
-                # ClickHouse spans don't fire sql.active_record notifications, so
-                # CallContextProcessor#apply_db_context never runs for them.
-                # Apply the span_name_formatter here with a synthetic AR-shaped context
-                # built from code.namespace/code.function set by apply_call_site_to_span.
-                formatter = RailsOtelContext.configuration.span_name_formatter
-                code_ns   = formatter && span.respond_to?(:attributes) &&
-                            span.attributes['code.namespace']
-                if code_ns
-                  fn = span.attributes['code.function']
-                  ar_ctx = { model_name: code_ns, method_name: fn, scope_name: nil,
-                             code_namespace: code_ns, code_function: fn }
-                  new_name = formatter.call(span_name, ar_ctx)
-                  if new_name && new_name != span_name
-                    span.set_attribute('l9.orig.name', span_name)
-                    span.name = new_name
+                  result = super(*args, **kwargs, &block)
+                  mod.apply_call_site_to_span(span, site)
+
+                  # ClickHouse spans don't fire sql.active_record notifications, so
+                  # CallContextProcessor#apply_db_context never runs for them.
+                  # Apply the span_name_formatter here with a synthetic AR-shaped context
+                  # built from code.namespace/code.function set by apply_call_site_to_span.
+                  formatter = RailsOtelContext.configuration.span_name_formatter
+                  code_ns   = formatter && span.respond_to?(:attributes) &&
+                              span.attributes['code.namespace']
+                  if code_ns
+                    fn = span.attributes['code.function']
+                    ar_ctx = { model_name: code_ns, method_name: fn, scope_name: nil,
+                               code_namespace: code_ns, code_function: fn }
+                    new_name = formatter.call(span_name, ar_ctx)
+                    if new_name && new_name != span_name
+                      span.set_attribute('l9.orig.name', span_name)
+                      span.name = new_name
+                    end
                   end
-                end
 
-                result
+                  result
+                end
+              ensure
+                Thread.current[reentrancy_key] = false
               end
-            ensure
-              Thread.current[reentrancy_key] = false
             end
           end
         end
