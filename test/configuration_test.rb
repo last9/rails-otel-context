@@ -11,8 +11,8 @@ class ConfigurationTest < Minitest::Test
     assert_equal false, RailsOtelContext.configuration.redis_source_enabled
   end
 
-  def test_default_clickhouse_enabled_is_true
-    assert_equal true, RailsOtelContext.configuration.clickhouse_enabled
+  def test_default_clickhouse_enabled_is_false
+    assert_equal false, RailsOtelContext.configuration.clickhouse_enabled
   end
 
   def test_default_request_context_enabled_is_false

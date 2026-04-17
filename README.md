@@ -76,7 +76,7 @@ DB spans additionally get:
 
 ## Configuration
 
-Zero configuration gets you everything above. The optional initializer adds span naming and slow-query detection:
+Zero configuration gets you everything above. The optional initializer adds span naming, slow-query detection, and opts into the heavier adapters:
 
 ```ruby
 # config/initializers/rails_otel_context.rb
@@ -115,6 +115,11 @@ RailsOtelContext.configure do |c|
 
   # Attach any per-request context to every span
   c.custom_span_attributes = -> { { 'tenant' => Current.tenant } if Current.tenant }
+
+  # Opt-in adapters — disabled by default because they patch third-party classes
+  # and add a span per call. Turn on what you actually use.
+  c.clickhouse_enabled             = true  # instrument click_house gem queries
+  c.connection_pool_tracing_enabled = true  # span per AR connection checkout
 end
 ```
 
@@ -222,7 +227,13 @@ end
 
 ## Redis and ClickHouse
 
-Redis and ClickHouse spans get the same `code.*` attributes pointing to the app-code frame that issued the call:
+Redis is enabled by default. ClickHouse requires opt-in:
+
+```ruby
+c.clickhouse_enabled = true
+```
+
+Both get the same `code.*` attributes pointing to the app-code frame that issued the call:
 
 ```json
 {
@@ -282,7 +293,7 @@ Full options:
 
 ## Connection pool tracing
 
-When you're chasing timeouts or thread starvation, knowing that `checkout` spent 200ms waiting for a connection is the difference between guessing and knowing. Enable it:
+When you're chasing timeouts or thread starvation, knowing that `checkout` spent 200ms waiting for a connection is the difference between guessing and knowing. Both `clickhouse_enabled` and `connection_pool_tracing_enabled` are off by default — they patch third-party classes and add a span per call, which is overhead you should choose consciously. Enable it:
 
 ```ruby
 RailsOtelContext.configure do |c|

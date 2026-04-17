@@ -16,7 +16,7 @@ module RailsOtelContext
 
     def initialize
       @redis_source_enabled = false
-      @clickhouse_enabled = true
+      @clickhouse_enabled = false
       @connection_pool_tracing_enabled = false
       @span_name_formatter = nil
       @custom_span_attributes = nil
