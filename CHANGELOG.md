@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.10] - 2026-04-17
+
+### Fixed
+- **`install_processor!` silently skipped when OTel SDK not yet configured**: Apps using `require: false` in the Gemfile + a manual `RailsOtelContext.install!` inside `config/initializers/` would silently lose the `CallContextProcessor` when the gem's initializer ran before the OTel SDK initializer (common when file ordering puts OTel setup after the gem's init file). The previous guard did `return unless OpenTelemetry.tracer_provider.respond_to?(:add_span_processor)` — on a `ProxyTracerProvider` this returned silently and `@processor_installed` stayed unset, so `code.*` attributes, `rails.controller`/`rails.action`, and `span_name_formatter` renames never applied. `install_processor!` now detects the still-booting state (`Rails.application && !Rails.application.initialized?`) and defers the actual registration to `Rails.application.config.after_initialize`, which runs after all initializers (including OTel SDK setup) have finished. Registration targets the application config directly rather than the gem's Railtie, so it works even when the Railtie class is defined late because of `require: false`.
+
 ## [0.9.9] - 2026-04-17
 
 ### Fixed

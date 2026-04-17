@@ -51,17 +51,26 @@ module RailsOtelContext
     end
 
     # Registers CallContextProcessor with the OTel tracer_provider.
-    # Called automatically by install!. Call this manually only when the OTel
-    # SDK is configured after install! has already run (rare):
+    # Called automatically by install!. Safe to call multiple times — idempotent.
     #
-    #   RailsOtelContext.install!          # hooks up AR/request context
-    #   OpenTelemetry::SDK.configure { … } # SDK configured later
-    #   RailsOtelContext.install_processor! # add processor to the now-real provider
-    #
-    # Safe to call multiple times — idempotent.
+    # When the app is still booting (Rails.application not yet initialized), the
+    # actual registration is deferred to config.after_initialize so it runs after
+    # all config/initializers — including the OTel SDK setup — have completed.
+    # This keeps `require: false` + manual install-in-initializer working even
+    # when the OTel SDK initializer sorts after the gem's initializer.
     def install_processor!
       return if @processor_installed
       return unless defined?(Rails) && Rails.root
+
+      if defined?(Rails.application) && Rails.application && !Rails.application.initialized?
+        Rails.application.config.after_initialize { do_install_processor! }
+      else
+        do_install_processor!
+      end
+    end
+
+    def do_install_processor!
+      return if @processor_installed
       return unless OpenTelemetry.tracer_provider.respond_to?(:add_span_processor)
 
       @processor_installed = true
