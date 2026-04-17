@@ -10,6 +10,7 @@ if ENV['COVERAGE']
 end
 
 require 'minitest/autorun'
+require 'minitest/mock'
 require 'opentelemetry-api'
 require 'ostruct'
 require 'logger'

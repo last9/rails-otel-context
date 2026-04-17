@@ -176,6 +176,93 @@ class ClickhouseAdapterTest < Minitest::Test
     end
   end
 
+  # ── schema-qualified table (db.name) ─────────────────────────────────────
+
+  def test_schema_qualified_table_sets_db_name_and_sql_table
+    with_tracer_spy do |calls|
+      execute_client.execute('SELECT * FROM analytics.events LIMIT 10')
+      span = calls[0]
+      assert_equal 'SELECT events',  span[:name]
+      assert_equal 'analytics',      span[:attributes]['db.name']
+      assert_equal 'events',         span[:attributes]['db.sql.table']
+    end
+  end
+
+  def test_unqualified_table_does_not_set_db_name
+    with_tracer_spy do |calls|
+      execute_client.execute('SELECT * FROM events LIMIT 10')
+      span = calls[0]
+      assert_equal 'SELECT events', span[:name]
+      refute span[:attributes].key?('db.name'), 'db.name must be absent for unqualified table'
+      assert_equal 'events', span[:attributes]['db.sql.table']
+    end
+  end
+
+  # ── reentrancy guard ──────────────────────────────────────────────────────
+
+  def test_reentrancy_guard_prevents_nested_span
+    reentrancy_key = RailsOtelContext::Adapters::Clickhouse::REENTRANCY_KEY
+
+    patch = RailsOtelContext::Adapters::Clickhouse.send(:build_patch_module, [:query])
+    patch.configure(app_root: Dir.pwd)
+
+    inner_called = false
+    klass = Class.new do
+      define_method(:query) do |_sql|
+        inner_called = true
+        :inner_result
+      end
+    end
+    klass.prepend(patch)
+
+    with_tracer_spy do |calls|
+      Thread.current[reentrancy_key] = true
+      result = klass.new.query('SELECT 1')
+      Thread.current[reentrancy_key] = false
+
+      assert_equal :inner_result, result, 'reentrancy guard must return super result directly'
+      assert inner_called, 'underlying method must still be called'
+      assert_equal 0, calls.size, 'no span must be created when reentrancy guard is active'
+    end
+  end
+
+  # ── span_name_formatter with code.namespace ───────────────────────────────
+
+  def test_span_name_formatter_applied_when_code_namespace_present
+    RailsOtelContext.configure do |c|
+      c.span_name_formatter = lambda { |_orig, ctx|
+        "#{ctx[:model_name]}.#{ctx[:method_name]}" if ctx[:model_name]
+      }
+    end
+
+    with_thread_source('/app/services/analytics_service.rb', 10, label: 'AnalyticsService#fetch') do
+      with_span_objects_tracer do |spans|
+        execute_client.execute('SELECT * FROM events')
+        span = spans[0]
+        refute_nil span
+        assert_equal 'AnalyticsService.fetch', span.name
+        assert_equal 'SELECT events',          span.attributes['l9.orig.name']
+      end
+    end
+  end
+
+  def test_span_name_formatter_not_applied_when_no_code_namespace
+    RailsOtelContext.configure do |c|
+      c.span_name_formatter = lambda { |_orig, ctx|
+        "#{ctx[:model_name]}.query" if ctx[:model_name]
+      }
+    end
+
+    # No caller location stub — call_site_for_app returns nil, so code.namespace is absent
+    with_span_objects_tracer do |spans|
+      execute_client(app_root: '/unlikely/root').execute('SELECT * FROM events')
+      span = spans[0]
+      refute_nil span
+      assert_equal 'SELECT events', span.name
+      refute span.attributes.key?('l9.orig.name')
+    end
+  end
+
   private
 
   def build_client(method_name, app_root: Dir.pwd, &stub)
@@ -205,6 +292,35 @@ class ClickhouseAdapterTest < Minitest::Test
 
   def command_client(app_root: Dir.pwd)
     build_client(:command, app_root: app_root) { |_sql| :ok }
+  end
+
+  # Like with_tracer_spy but yields the array of FakeSpan objects (not hashes),
+  # so callers can read span.name AFTER the block — after any formatter renames it.
+  def with_span_objects_tracer
+    spans = []
+    fake_tracer = Object.new
+    fake_tracer.define_singleton_method(:in_span) do |name, **_kwargs, &blk|
+      span = FakeSpan.new
+      span.name = name
+      spans << span
+      blk.call(span)
+      span
+    end
+    fake_provider = Object.new
+    fake_provider.define_singleton_method(:tracer) { |_n| fake_tracer }
+
+    singleton = OpenTelemetry.singleton_class
+    singleton.class_eval do
+      alias_method :__rails_otel_ctx_orig_tp2, :tracer_provider
+      define_method(:tracer_provider) { fake_provider }
+    end
+
+    yield spans
+  ensure
+    singleton.class_eval do
+      alias_method :tracer_provider, :__rails_otel_ctx_orig_tp2
+      remove_method :__rails_otel_ctx_orig_tp2
+    end
   end
 
   def with_tracer_spy
