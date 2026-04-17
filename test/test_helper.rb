@@ -11,6 +11,7 @@ end
 
 require 'minitest/autorun'
 require 'opentelemetry-api'
+require 'ostruct'
 require 'logger'
 
 # Allow tests to run without Rails
