@@ -1,5 +1,14 @@
 # frozen_string_literal: true
 
+if ENV['COVERAGE']
+  require 'simplecov'
+  SimpleCov.start do
+    add_filter '/test/'
+    add_filter '/bench/'
+    track_files 'lib/**/*.rb'
+  end
+end
+
 require 'minitest/autorun'
 require 'opentelemetry-api'
 require 'logger'

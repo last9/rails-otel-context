@@ -93,7 +93,7 @@ module RailsOtelContext
 
     def drain_response(body, headers)
       chunks = []
-      body.each { |chunk| chunks << chunk }
+      body.each { |chunk| chunks << chunk } # rubocop:disable Style/MapIntoArray -- RackBody (Rails 8) has no #map
       body.close if body.respond_to?(:close)
 
       content_type = headers['Content-Type'] || headers['content-type']
