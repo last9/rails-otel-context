@@ -42,6 +42,7 @@
 
 # Gem
 Gemfile.lock
+gemfiles/*.lock
 
 # Data & media files — never commit screenshots, exports, or sample data
 *.png
