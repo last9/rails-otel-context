@@ -50,7 +50,7 @@ jobs:
       run: |
         for f in test/*_test.rb; do
           echo "Running $f..."
-          ruby -Ilib:test "$f"
+          bundle exec ruby -Ilib:test "$f"
         done
       env:
         RAILS_OTEL_CONTEXT_TEST: 'true'
