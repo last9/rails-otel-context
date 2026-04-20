@@ -6,7 +6,10 @@ module RailsOtelContext
                   :clickhouse_enabled,
                   :connection_pool_tracing_enabled,
                   :span_name_formatter,
-                  :slow_query_threshold_ms
+                  :slow_query_threshold_ms,
+                  :capture_allocations,
+                  :capture_memory_metrics,
+                  :process_sampler_interval_sec
 
     # Deprecated: rails.controller / rails.action / rails.job are now always set
     # on every span. This option is kept for backwards compatibility and has no effect.
@@ -22,6 +25,9 @@ module RailsOtelContext
       @custom_span_attributes = nil
       @request_context_enabled = false
       @slow_query_threshold_ms = nil
+      @capture_allocations = false
+      @capture_memory_metrics = false
+      @process_sampler_interval_sec = nil
     end
 
     # Accepts a callable (lambda/proc) that returns a Hash of string keys to string values.
