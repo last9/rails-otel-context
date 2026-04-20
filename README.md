@@ -312,6 +312,45 @@ Each `checkout` call gets its own span with pool state at the moment of acquisit
 
 Spans inside transactions and `with_connection` blocks are skipped — a pinned connection is already held, so there's nothing to measure.
 
+## Memory and GC attribution
+
+Your pods are getting OOM-killed. You want to know which endpoint is eating the memory. You don't want to run a profiler in production. You don't want to pay for an APM.
+
+Same problem [Scout APM](https://github.com/scoutapp/scout_apm_ruby) solved years ago with their "Memory Bloat" feature, and their trick is embarrassingly simple: wrap every instrumented layer with `GC.stat` before and after, subtract the two, call the difference "this layer's allocations." No profiler. No stack sampling. No magic.
+
+Turns out OTel already wraps those same layers with spans — controller actions, AR queries, view renders, HTTP calls, cache ops, jobs. So we do the same thing Scout does, just on the Span object instead of in a proprietary agent. One prepend and you get per-layer allocation attribution on every trace, for free.
+
+Off by default. Flip it on:
+
+```ruby
+RailsOtelContext.configure do |c|
+  c.capture_allocations          = true   # ruby.alloc.* on every span
+  c.capture_memory_metrics       = true   # per-request / per-job histograms
+  c.process_sampler_interval_sec = 15     # background RSS + heap gauges; nil to disable
+end
+```
+
+That's it. Now every span in your trace has `ruby.alloc.objects`, `ruby.gc.time_ms`, `ruby.gc.major_count`, `ruby.gc.minor_count`. Because `rails.controller`, `rails.action`, `rails.job`, `code.namespace`, `code.function`, `code.filepath`, `code.lineno` are already there, any tracing backend can rank the offenders. No dashboard required.
+
+You also get histograms — `ruby.request.allocated_objects` labeled by `{controller, action}` and `ruby.job.allocated_objects` labeled by `{job_class, queue}`, plus GC time, major, minor. Low cardinality. Aggregatable. Recorded inside the active span so trace-based exemplars link the spike back to the offending trace. Want that link? One env var:
+
+```bash
+OTEL_METRICS_EXEMPLAR_FILTER=trace_based
+```
+
+Process-level gauges come out under `process.runtime.ruby.*` — the OTel semantic convention namespace. Backends with built-in Ruby runtime panels (live slots, free slots, RSS, major/minor GC counts, total allocated objects) surface them automatically. Samples carry `role` (`web` or `sidekiq`) and `pid`.
+
+### What you're trading away
+
+- `GC.stat` is process-global. Under threaded Puma, concurrent spans on the same worker smear allocations across each other. p99 ranking still surfaces real offenders. Scout eats the same tradeoff.
+- No allocated-**bytes**. `malloc_increase_bytes` resets on every GC, so deltas at span grain are unreliable. Object count is monotonic and that's what we report.
+- No retained-heap analysis. That needs `ObjectSpace.dump_all`, which is on-demand only and out of scope here.
+- RSS on Linux only. macOS / Windows dev boxes skip the gauge silently.
+
+### Overhead
+
+`GC.stat(:key)` with a symbol returns a primitive, not a Hash — no allocation. Four reads on span start, four on span finish. Sub-microsecond each. If you have a hundred spans per request you're paying under a millisecond for the entire feature.
+
 ## Performance
 
 `CallContextProcessor#on_start` fires for every span. For a typical 10–20 span request the overhead is in the low-microsecond range and does not require configuration.
