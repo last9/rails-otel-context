@@ -70,7 +70,7 @@ module RailsOtelContext
       # TracerProvider instance each time, so equal? detects provider replacement
       # and triggers re-registration, while guarding against double-registration
       # on the same provider.
-      return if @processor_registered_on&.equal?(OpenTelemetry.tracer_provider)
+      return if @processor_registered_on.equal?(OpenTelemetry.tracer_provider)
 
       @processor_registered_on = OpenTelemetry.tracer_provider
       processor = RailsOtelContext::CallContextProcessor.new(app_root: Rails.root)
