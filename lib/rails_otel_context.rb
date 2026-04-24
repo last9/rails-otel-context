@@ -51,20 +51,28 @@ module RailsOtelContext
     end
 
     # Registers CallContextProcessor with the OTel tracer_provider.
-    # Called automatically by install!. Call this manually only when the OTel
-    # SDK is configured after install! has already run (rare):
+    # Called automatically by install!. Safe to call manually after a second
+    # OpenTelemetry::SDK.configure call replaces the tracer_provider — the
+    # method detects the provider change and re-registers automatically:
     #
     #   RailsOtelContext.install!          # hooks up AR/request context
-    #   OpenTelemetry::SDK.configure { … } # SDK configured later
-    #   RailsOtelContext.install_processor! # add processor to the now-real provider
+    #   OpenTelemetry::SDK.configure { … } # second SDK configure (replaces provider)
+    #   RailsOtelContext.install_processor! # re-registers on the new provider
     #
-    # Safe to call multiple times — idempotent.
+    # Idempotent per provider instance: re-registers when OpenTelemetry::SDK.configure
+    # is called again (which replaces the global tracer_provider with a new object),
+    # but skips registration when called multiple times against the same provider.
     def install_processor!
-      return if @processor_installed
       return unless defined?(Rails) && Rails.root
       return unless OpenTelemetry.tracer_provider.respond_to?(:add_span_processor)
 
-      @processor_installed = true
+      # Use object identity, not a boolean flag. SDK.configure creates a new
+      # TracerProvider instance each time, so equal? detects provider replacement
+      # and triggers re-registration, while guarding against double-registration
+      # on the same provider.
+      return if @processor_registered_on&.equal?(OpenTelemetry.tracer_provider)
+
+      @processor_registered_on = OpenTelemetry.tracer_provider
       processor = RailsOtelContext::CallContextProcessor.new(app_root: Rails.root)
       OpenTelemetry.tracer_provider.add_span_processor(processor)
     end
