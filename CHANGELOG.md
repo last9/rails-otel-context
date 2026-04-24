@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.10] - 2026-04-24
+
+### Fixed
+- **`install_processor!` double-registration after second `OpenTelemetry::SDK.configure`**: Previously guarded by a boolean `@processor_installed` flag. When `SDK.configure` is called a second time (e.g., two initializers both call it), a new `TracerProvider` instance replaces the global — but `@processor_installed` stayed `true`, so `CallContextProcessor` was never added to the new provider. Result: all `code.activerecord.*`, `rails.controller`, and `rails.action` enrichments silently disappeared from spans. Fixed by tracking provider identity (`@processor_registered_on.equal?(provider)`): re-registers on provider replacement, guards against double-registration on the same provider, and captures `tracer_provider` in a single local read to eliminate a subtle race condition.
+
 ## [0.9.9] - 2026-04-17
 
 ### Fixed
