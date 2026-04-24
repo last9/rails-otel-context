@@ -140,8 +140,8 @@ RailsOtelContext.configure do |c|
   c.span_name_formatter = lambda { |original, ar| ... }
 end
 
-RailsOtelContext.install! # registers AR hooks, around_action, and the span processor
-
+# Configure the OTel SDK before calling install! so the processor is
+# registered on the real TracerProvider, not the pre-configure proxy.
 require 'opentelemetry/sdk'
 require 'opentelemetry/exporter/otlp'
 require 'opentelemetry/instrumentation/all'
@@ -150,9 +150,24 @@ OpenTelemetry::SDK.configure do |c|
   c.service_name = ENV.fetch('OTEL_SERVICE_NAME', 'my_app')
   c.use_all
 end
+
+RailsOtelContext.install! # registers AR hooks, around_action, and the span processor
 ```
 
 `install!` is idempotent — the railtie calls it automatically via `after_initialize`, so apps that let Bundler auto-require the gem do not need to call it.
+
+### Two-initializer pattern
+
+If your OTel SDK setup lives in a separate initializer that loads after the gem (e.g., Rails loads `rails_otel_context.rb` before `tracing.rb` alphabetically), call `install_processor!` at the end of the SDK initializer. Since 0.9.10, `install_processor!` tracks provider identity and re-registers automatically when `SDK.configure` has replaced the provider:
+
+```ruby
+# config/initializers/tracing.rb  (loads after rails_otel_context.rb)
+OpenTelemetry::SDK.configure do |c|
+  c.use_all
+end
+
+RailsOtelContext.install_processor! if defined?(RailsOtelContext)
+```
 
 ## How `code.namespace` / `code.function` works
 
