@@ -40,9 +40,7 @@ class RailsOtelContextTest < Minitest::Test
 
     original  = OpenTelemetry.tracer_provider
     add_calls = 0
-    fake_provider = Object.new
-    fake_provider.define_singleton_method(:respond_to?) { |m| m == :add_span_processor || super }
-    fake_provider.define_singleton_method(:add_span_processor) { |_| add_calls += 1 }
+    fake_provider = make_fake_provider(add_calls_ref: proc { add_calls += 1 })
 
     OpenTelemetry.tracer_provider = fake_provider
 
@@ -60,19 +58,14 @@ class RailsOtelContextTest < Minitest::Test
 
     original  = OpenTelemetry.tracer_provider
     add_calls = 0
-    make_provider = lambda do
-      p = Object.new
-      p.define_singleton_method(:respond_to?) { |m| m == :add_span_processor || super }
-      p.define_singleton_method(:add_span_processor) { |_| add_calls += 1 }
-      p
-    end
+    counter   = proc { add_calls += 1 }
 
-    OpenTelemetry.tracer_provider = make_provider.call
+    OpenTelemetry.tracer_provider = make_fake_provider(add_calls_ref: counter)
     RailsOtelContext.install_processor!
     assert_equal 1, add_calls, 'should register on first provider'
 
     # Simulate OpenTelemetry::SDK.configure called again — replaces the provider
-    OpenTelemetry.tracer_provider = make_provider.call
+    OpenTelemetry.tracer_provider = make_fake_provider(add_calls_ref: counter)
     RailsOtelContext.install_processor!
     assert_equal 2, add_calls, 'should re-register on new provider after SDK.configure replacement'
 
@@ -98,5 +91,14 @@ class RailsOtelContextTest < Minitest::Test
   ensure
     OpenTelemetry.tracer_provider = original if original
     RailsOtelContext.instance_variable_set(:@processor_registered_on, nil)
+  end
+
+  private
+
+  def make_fake_provider(add_calls_ref:)
+    p = Object.new
+    p.define_singleton_method(:respond_to?) { |m| m == :add_span_processor || super }
+    p.define_singleton_method(:add_span_processor) { |_| add_calls_ref.call }
+    p
   end
 end

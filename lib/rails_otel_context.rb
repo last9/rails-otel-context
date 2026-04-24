@@ -64,17 +64,22 @@ module RailsOtelContext
     # but skips registration when called multiple times against the same provider.
     def install_processor!
       return unless defined?(Rails) && Rails.root
-      return unless OpenTelemetry.tracer_provider.respond_to?(:add_span_processor)
+      return unless defined?(OpenTelemetry)
+
+      # Capture once: tracer_provider is a global that SDK.configure can replace
+      # on another thread. A single local read makes the rest of the method consistent.
+      provider = OpenTelemetry.tracer_provider
+      return unless provider.respond_to?(:add_span_processor)
 
       # Use object identity, not a boolean flag. SDK.configure creates a new
       # TracerProvider instance each time, so equal? detects provider replacement
       # and triggers re-registration, while guarding against double-registration
       # on the same provider.
-      return if @processor_registered_on.equal?(OpenTelemetry.tracer_provider)
+      return if @processor_registered_on.equal?(provider)
 
-      @processor_registered_on = OpenTelemetry.tracer_provider
+      @processor_registered_on = provider
       processor = RailsOtelContext::CallContextProcessor.new(app_root: Rails.root)
-      OpenTelemetry.tracer_provider.add_span_processor(processor)
+      provider.add_span_processor(processor)
     end
 
     private
