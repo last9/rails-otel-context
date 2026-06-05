@@ -404,6 +404,40 @@ class ActiveRecordContextTest < Minitest::Test
     assert_kind_of ActiveRecord::Relation, result
   end
 
+  # Capturing the scope as a bound Method locks self to the defining class, so
+  # inherited scopes run with self = parent. With an abstract base class whose
+  # default_scope calls a subclass-implemented method, this raises
+  # NotImplementedError. The wrapper must preserve the actual receiver
+  # (the subclass) at call time.
+  def test_scope_name_tracking_preserves_subclass_receiver_for_inherited_scopes
+    parent = build_scope_tracking_class
+    parent.define_singleton_method(:category) do
+      raise NotImplementedError, 'Subclasses must implement the category method'
+    end
+    parent.scope(:unresolved, lambda {
+      FakeRelation.new.tap { |r| r.instance_variable_set(:@kind, category) }
+    })
+
+    child = Class.new(parent)
+    child.define_singleton_method(:category) { 'security' }
+
+    result = child.unresolved
+    assert_equal 'security', result.instance_variable_get(:@kind),
+                 'scope body must run with self = actual receiver (subclass), not the defining class'
+    assert_equal 'unresolved', result.otel_scope_name
+  end
+
+  def test_scope_name_tracking_forwards_kwargs
+    model_class = build_scope_tracking_class
+    model_class.scope(:by_kind, lambda { |kind:|
+      FakeRelation.new.tap { |r| r.instance_variable_set(:@kind, kind) }
+    })
+
+    result = model_class.by_kind(kind: 'security')
+    assert_equal 'security', result.instance_variable_get(:@kind)
+    assert_equal 'by_kind', result.otel_scope_name
+  end
+
   # RelationScopeCapture — pushes scope name to thread-local during exec_queries
 
   def test_relation_scope_capture_sets_scope_thread_key_during_exec_queries
@@ -543,6 +577,51 @@ class ActiveRecordContextTest < Minitest::Test
   ensure
     Thread.current[:_rails_otel_ctx_scope] = nil
     RailsOtelContext::ActiveRecordContext.clear!
+  end
+
+  # Same bound-Method pitfall as ScopeNameTracking — an inherited class method
+  # must run with self = actual receiver (the subclass), not the defining class.
+  def test_class_method_tracking_preserves_subclass_receiver_for_inherited_methods
+    app_root = File.expand_path('..', __dir__)
+    RailsOtelContext::ActiveRecordContext.install!(app_root: app_root)
+
+    parent = Class.new do
+      extend RailsOtelContext::ActiveRecordContext::ClassMethodScopeTracking
+
+      def self.category
+        raise NotImplementedError, 'Subclasses must implement the category method'
+      end
+
+      def self.active
+        FakeRelation.new.tap { |r| r.instance_variable_set(:@kind, category) }
+      end
+    end
+
+    child = Class.new(parent)
+    child.define_singleton_method(:category) { 'security' }
+
+    result = child.active
+    assert_equal 'security', result.instance_variable_get(:@kind),
+                 'class method must run with self = actual receiver (subclass), not the defining class'
+    assert_equal 'active', result.otel_scope_name
+  end
+
+  def test_class_method_tracking_does_not_wrap_otel_aliases
+    app_root = File.expand_path('..', __dir__)
+    RailsOtelContext::ActiveRecordContext.install!(app_root: app_root)
+
+    model_class = Class.new do
+      extend RailsOtelContext::ActiveRecordContext::ClassMethodScopeTracking
+
+      def self.active
+        FakeRelation.new
+      end
+    end
+
+    wrapped = model_class.instance_variable_get(:@_otel_wrapped_class_methods) || {}
+    internal = wrapped.keys.select { |k| k.to_s.start_with?('__otel') }
+    assert_empty internal,
+                 'singleton_method_added must skip internal __otel aliases (re-entrancy guard)'
   end
 
   # N+1 detection

@@ -46,6 +46,11 @@ module RailsOtelContext
       def singleton_method_added(name)
         super
 
+        # Internal aliases created below (and by ScopeNameTracking) re-trigger
+        # this hook; wrapping them would route calls back through the wrapper
+        # and break receiver dispatch.
+        return if name.to_s.start_with?('__otel')
+
         @_otel_wrapped_class_methods ||= {}
         return if @_otel_wrapped_class_methods[name]
 
@@ -63,11 +68,14 @@ module RailsOtelContext
 
         # Mark before define_singleton_method to prevent re-entrancy for this name
         @_otel_wrapped_class_methods[name] = true
-        name_str = name.to_s.freeze
-        original = method(name)
+        name_str   = name.to_s.freeze
+        alias_name = :"__otel_cm_orig_#{name}"
+        # Alias instead of capturing a bound Method so inherited class methods
+        # keep self = the actual receiver (see ScopeNameTracking).
+        singleton_class.alias_method(alias_name, name)
 
         define_singleton_method(name) do |*args, **kwargs, &blk|
-          result = original.call(*args, **kwargs, &blk)
+          result = send(alias_name, *args, **kwargs, &blk)
           if defined?(::ActiveRecord::Relation) && result.is_a?(::ActiveRecord::Relation)
             result.instance_variable_set(:@_otel_scope_name, name_str)
           end
@@ -138,10 +146,15 @@ module RailsOtelContext
         @_otel_wrapped_scopes ||= {}
         return if @_otel_wrapped_scopes[name]
 
-        name_str = name.to_s.freeze
-        original = method(name)
-        define_singleton_method(name) do |*args|
-          relation = original.call(*args)
+        name_str   = name.to_s.freeze
+        alias_name = :"__otel_scope_orig_#{name}"
+        # Alias instead of capturing a bound Method: a bound Method locks self
+        # to the defining class, so inherited scopes would run with self =
+        # parent and re-evaluate default_scope in the wrong class context.
+        # send(alias_name) dispatches with self = the actual receiver.
+        singleton_class.alias_method(alias_name, name)
+        define_singleton_method(name) do |*args, **kwargs, &blk|
+          relation = send(alias_name, *args, **kwargs, &blk)
           if relation.is_a?(::ActiveRecord::Relation)
             relation.instance_variable_set(:@_otel_scope_name, name_str)
           end
