@@ -73,3 +73,6 @@ gemfiles/*.lock
 
 # Claude Code
 .claude/
+
+# Local docs (design specs, solution learnings — not for repo)
+docs/

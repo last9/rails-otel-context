@@ -17,6 +17,9 @@ Published to RubyGems. Maintained by Last9.
 Always reproduce first — write a failing test before touching code.
 Run the new test against pre-fix code to confirm it fails, then apply fix and
 confirm it passes. Never commit a fix without a reproducing test.
+Documented solutions to past problems live in `docs/solutions/` (organized by
+category, YAML frontmatter: `module`, `tags`, `problem_type`) — relevant when
+debugging or changing behavior in previously documented areas.
 
 ## ClickHouse adapter rules
 - `CANDIDATE_METHODS` must not include methods that delegate entirely to another
