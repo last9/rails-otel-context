@@ -427,6 +427,24 @@ class ActiveRecordContextTest < Minitest::Test
     assert_equal 'unresolved', result.otel_scope_name
   end
 
+  def test_scope_name_tracking_preserves_receiver_for_grandchild_classes
+    parent = build_scope_tracking_class
+    parent.define_singleton_method(:category) do
+      raise NotImplementedError, 'Subclasses must implement the category method'
+    end
+    parent.scope(:unresolved, lambda {
+      FakeRelation.new.tap { |r| r.instance_variable_set(:@kind, category) }
+    })
+
+    child = Class.new(parent)
+    child.define_singleton_method(:category) { 'security' }
+    grandchild = Class.new(child)
+
+    result = grandchild.unresolved
+    assert_equal 'security', result.instance_variable_get(:@kind)
+    assert_equal 'unresolved', result.otel_scope_name
+  end
+
   def test_scope_name_tracking_forwards_kwargs
     model_class = build_scope_tracking_class
     model_class.scope(:by_kind, lambda { |kind:|
@@ -622,6 +640,40 @@ class ActiveRecordContextTest < Minitest::Test
     internal = wrapped.keys.select { |k| k.to_s.start_with?('__otel') }
     assert_empty internal,
                  'singleton_method_added must skip internal __otel aliases (re-entrancy guard)'
+  end
+
+  # When both tracking modules are active (as install! sets up on
+  # ActiveRecord::Base), a scope-macro method is already wrapped by
+  # ScopeNameTracking — ClassMethodScopeTracking must not wrap it a second
+  # time, which would add a useless closure hop and leak a __otel_cm_orig_*
+  # alias per scope.
+  def test_scope_macro_methods_not_double_wrapped_by_class_method_tracking
+    app_root = File.expand_path('..', __dir__)
+    RailsOtelContext::ActiveRecordContext.install!(app_root: app_root)
+
+    scope_base = Module.new do
+      def scope(name, body)
+        define_singleton_method(name, &body)
+      end
+    end
+
+    model_class = Class.new do
+      extend scope_base
+      extend RailsOtelContext::ActiveRecordContext::ScopeNameTracking
+      extend RailsOtelContext::ActiveRecordContext::ClassMethodScopeTracking
+    end
+    model_class.scope(:recent, -> { FakeRelation.new })
+
+    cm_aliases = model_class.singleton_methods(false)
+                            .select { |m| m.to_s.start_with?('__otel_cm_orig_') }
+    assert_empty cm_aliases,
+                 'ClassMethodScopeTracking must not re-wrap a scope already wrapped by ScopeNameTracking'
+
+    wrapped_cm = model_class.instance_variable_get(:@_otel_wrapped_class_methods) || {}
+    refute wrapped_cm.key?(:recent), 'scope method must not appear in @_otel_wrapped_class_methods'
+
+    # Tagging still works through the single ScopeNameTracking wrapper
+    assert_equal 'recent', model_class.recent.instance_variable_get(:@_otel_scope_name)
   end
 
   # N+1 detection

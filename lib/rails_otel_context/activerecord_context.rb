@@ -51,6 +51,11 @@ module RailsOtelContext
         # and break receiver dispatch.
         return if name.to_s.start_with?('__otel')
 
+        # ScopeNameTracking's redefinition of a scope method also re-triggers
+        # this hook. That method is already wrapped — wrapping it again would
+        # add a useless closure hop and leak a __otel_cm_orig_* alias.
+        return if @_otel_wrapped_scopes&.key?(name)
+
         @_otel_wrapped_class_methods ||= {}
         return if @_otel_wrapped_class_methods[name]
 
@@ -140,11 +145,16 @@ module RailsOtelContext
     # Wraps scope-generated class methods to store the scope name on the Relation.
     module ScopeNameTracking
       def scope(name, body, &)
-        super
-
-        # Guard against double-wrapping on class reload in development
+        # Guard against double-wrapping on class reload in development.
+        # Marked BEFORE super so ClassMethodScopeTracking's
+        # singleton_method_added hook (which fires for both the scope macro's
+        # definition and our redefinition below) sees the name as owned by
+        # this module and skips it.
         @_otel_wrapped_scopes ||= {}
-        return if @_otel_wrapped_scopes[name]
+        return super if @_otel_wrapped_scopes[name]
+
+        @_otel_wrapped_scopes[name] = true
+        super
 
         name_str   = name.to_s.freeze
         alias_name = :"__otel_scope_orig_#{name}"
@@ -160,7 +170,6 @@ module RailsOtelContext
           end
           relation
         end
-        @_otel_wrapped_scopes[name] = true
       end
     end
 
