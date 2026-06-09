@@ -42,6 +42,7 @@ if SQLITE3_FOR_SCOPE_TEST
     default_scope { where(kind: category) }
     scope :unresolved, -> { where(resolved_at: nil) }
     scope :critical,   -> { where(state: %w[blocked suspended]) }
+    scope :in_state,   ->(state:) { where(state: state) } # keyword-arg scope
 
     def self.category
       raise NotImplementedError, 'Subclasses must implement category'
@@ -55,6 +56,26 @@ if SQLITE3_FOR_SCOPE_TEST
   class OtelComplianceAssessment < OtelAssessment
     def self.category = 'compliance'
   end
+
+  # Enables scope-key capture for aggregate/existence paths (count/pluck/exists?)
+  # in addition to record loading.
+  ActiveRecord::Relation.prepend(RailsOtelContext::ActiveRecordContext::RelationScopeCapture)
+
+  # Reads the captured scope name at sql.active_record start, exactly as the gem's
+  # own Subscriber does (the key is cleared in ensure before a block subscriber's
+  # finish callback fires, so a start-reading object subscriber is required).
+  SCOPE_PROBE = Object.new
+  def SCOPE_PROBE.start(_name, _id, _payload)
+    (@captured ||= []) << Thread.current[:_rails_otel_ctx_scope]
+  end
+
+  def SCOPE_PROBE.finish(_name, _id, _payload); end
+
+  def SCOPE_PROBE.captured = (@captured ||= [])
+
+  def SCOPE_PROBE.reset = (@captured = [])
+
+  ActiveSupport::Notifications.subscribe('sql.active_record', SCOPE_PROBE)
 end
 
 class InheritedScopeRealArTest < Minitest::Test
@@ -106,5 +127,55 @@ class InheritedScopeRealArTest < Minitest::Test
     grandchild = Class.new(OtelSecurityAssessment)
     def grandchild.category = 'security'
     assert_equal [], grandchild.unresolved.critical.to_a
+  end
+
+  # Returns the distinct scope names captured during the SQL fired by the block.
+  def scopes_seen(&)
+    SCOPE_PROBE.reset
+    yield
+    SCOPE_PROBE.captured.compact.uniq
+  end
+
+  def test_aggregate_and_existence_queries_carry_scope_name
+    OtelSecurityAssessment.create!(state: 'blocked')
+
+    count_scopes  = scopes_seen { OtelSecurityAssessment.unresolved.count }
+    sum_scopes    = scopes_seen { OtelSecurityAssessment.unresolved.sum(:id) }
+    max_scopes    = scopes_seen { OtelSecurityAssessment.unresolved.maximum(:id) }
+    pluck_scopes  = scopes_seen { OtelSecurityAssessment.unresolved.pluck(:id) }
+    exists_scopes = scopes_seen { OtelSecurityAssessment.unresolved.exists? }
+    load_scopes   = scopes_seen { OtelSecurityAssessment.unresolved.to_a }
+
+    # count/sum/maximum all route through #calculate — one hook covers them.
+    assert_equal ['unresolved'], count_scopes
+    assert_equal ['unresolved'], sum_scopes
+    assert_equal ['unresolved'], max_scopes
+    assert_equal ['unresolved'], pluck_scopes
+    assert_equal ['unresolved'], exists_scopes
+    assert_equal ['unresolved'], load_scopes # record loading was already tagged
+  end
+
+  def test_aggregate_values_are_unchanged_by_scope_capture
+    OtelSecurityAssessment.create!(state: 'blocked', resolved_at: nil)
+    OtelSecurityAssessment.create!(state: 'blocked', resolved_at: Time.now)
+
+    assert_equal OtelSecurityAssessment.unresolved.to_a.size, OtelSecurityAssessment.unresolved.count
+    assert OtelSecurityAssessment.unresolved.exists?
+    assert_equal 1, OtelSecurityAssessment.unresolved.pluck(:id).size
+  end
+
+  def test_bare_where_is_not_scope_tagged
+    OtelSecurityAssessment.create!(state: 'blocked')
+    # A bare relation has no scope name, so its span must not be scope-tagged.
+    seen = scopes_seen { OtelSecurityAssessment.where(state: 'blocked').to_a }
+    assert_empty seen
+  end
+
+  def test_inherited_scope_forwards_keyword_arguments
+    OtelSecurityAssessment.create!(state: 'blocked')
+
+    relation = OtelSecurityAssessment.in_state(state: 'blocked')
+    assert_equal 1, relation.count
+    assert_equal 'in_state', relation.instance_variable_get(:@_otel_scope_name)
   end
 end

@@ -174,8 +174,37 @@ module RailsOtelContext
     end
 
     # Captures scope name from Relation at SQL materialization time.
+    #
+    # exec_queries covers record-loading (.to_a, .load). Aggregate and existence
+    # queries take separate paths that never call exec_queries -- count/sum/etc.
+    # go through #calculate, and #pluck / #exists? are their own methods -- so each
+    # needs the same scope-key capture to tag its sql.active_record span.
     module RelationScopeCapture
       def exec_queries(&)
+        scope_name = instance_variable_get(:@_otel_scope_name)
+        Thread.current[SCOPE_THREAD_KEY] = scope_name if scope_name
+        super
+      ensure
+        Thread.current[SCOPE_THREAD_KEY] = nil
+      end
+
+      def calculate(*args, **kwargs, &)
+        scope_name = instance_variable_get(:@_otel_scope_name)
+        Thread.current[SCOPE_THREAD_KEY] = scope_name if scope_name
+        super
+      ensure
+        Thread.current[SCOPE_THREAD_KEY] = nil
+      end
+
+      def pluck(*args, &)
+        scope_name = instance_variable_get(:@_otel_scope_name)
+        Thread.current[SCOPE_THREAD_KEY] = scope_name if scope_name
+        super
+      ensure
+        Thread.current[SCOPE_THREAD_KEY] = nil
+      end
+
+      def exists?(*args)
         scope_name = instance_variable_get(:@_otel_scope_name)
         Thread.current[SCOPE_THREAD_KEY] = scope_name if scope_name
         super

@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.9.11] - 2026-06-09
 
+### Added
+- **Scope tracking now tags aggregate and existence queries.** Previously `code.activerecord.scope` was set only for record-loading queries (`Relation#exec_queries`). Aggregate queries (`count`, `sum`, `average`, `minimum`, `maximum` via `calculate`), `pluck`, and `exists?` take separate paths that never call `exec_queries`, so their spans were never scope-tagged. `RelationScopeCapture` now hooks those paths with the same thread-local capture, so `Model.scope.count` and friends carry the scope name. No change to query results; verified against the full suite. (`pick` is intentionally not hooked — it delegates to `pluck` and would risk a nested key-clear.)
+
 ### Fixed
 - **Inherited scopes on abstract base classes raised `NotImplementedError`** (#34, #35): `ScopeNameTracking` and `ClassMethodScopeTracking` captured the wrapped method as a bound `Method` object, which locks the receiver to the defining class. When a subclass called an inherited scope, the scope body ran with `self` set to the parent class, so a base class whose `default_scope` calls a subclass-implemented abstract method re-evaluated that method in the wrong context. Both wrappers now alias the original method and dispatch via `send`, so `self` resolves to the actual receiver at call time, restoring standard Ruby inheritance semantics. Also guards the internal `__otel` aliases against re-wrapping by `singleton_method_added`, and forwards kwargs and blocks through the scope wrapper. Regression tests cover inherited scopes, inherited class methods, kwargs forwarding, grandchild inheritance, and the re-entrancy guard.
 
