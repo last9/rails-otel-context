@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.11] - 2026-06-09
+
+### Fixed
+- **Inherited scopes on abstract base classes raised `NotImplementedError`** (#34, #35): `ScopeNameTracking` and `ClassMethodScopeTracking` captured the wrapped method as a bound `Method` object, which locks the receiver to the defining class. When a subclass called an inherited scope, the scope body ran with `self` set to the parent class, so a base class whose `default_scope` calls a subclass-implemented abstract method re-evaluated that method in the wrong context. Both wrappers now alias the original method and dispatch via `send`, so `self` resolves to the actual receiver at call time, restoring standard Ruby inheritance semantics. Also guards the internal `__otel` aliases against re-wrapping by `singleton_method_added`, and forwards kwargs and blocks through the scope wrapper. Regression tests cover inherited scopes, inherited class methods, kwargs forwarding, grandchild inheritance, and the re-entrancy guard.
+
 ## [0.9.10] - 2026-04-24
 
 ### Fixed
