@@ -46,6 +46,16 @@ module RailsOtelContext
       def singleton_method_added(name)
         super
 
+        # Internal aliases created below (and by ScopeNameTracking) re-trigger
+        # this hook; wrapping them would route calls back through the wrapper
+        # and break receiver dispatch.
+        return if name.to_s.start_with?('__otel')
+
+        # ScopeNameTracking's redefinition of a scope method also re-triggers
+        # this hook. That method is already wrapped — wrapping it again would
+        # add a useless closure hop and leak a __otel_cm_orig_* alias.
+        return if @_otel_wrapped_scopes&.key?(name)
+
         @_otel_wrapped_class_methods ||= {}
         return if @_otel_wrapped_class_methods[name]
 
@@ -63,11 +73,14 @@ module RailsOtelContext
 
         # Mark before define_singleton_method to prevent re-entrancy for this name
         @_otel_wrapped_class_methods[name] = true
-        name_str = name.to_s.freeze
-        original = method(name)
+        name_str   = name.to_s.freeze
+        alias_name = :"__otel_cm_orig_#{name}"
+        # Alias instead of capturing a bound Method so inherited class methods
+        # keep self = the actual receiver (see ScopeNameTracking).
+        singleton_class.alias_method(alias_name, name)
 
         define_singleton_method(name) do |*args, **kwargs, &blk|
-          result = original.call(*args, **kwargs, &blk)
+          result = send(alias_name, *args, **kwargs, &blk)
           if defined?(::ActiveRecord::Relation) && result.is_a?(::ActiveRecord::Relation)
             result.instance_variable_set(:@_otel_scope_name, name_str)
           end
@@ -132,28 +145,66 @@ module RailsOtelContext
     # Wraps scope-generated class methods to store the scope name on the Relation.
     module ScopeNameTracking
       def scope(name, body, &)
+        # Guard against double-wrapping on class reload in development.
+        # Marked BEFORE super so ClassMethodScopeTracking's
+        # singleton_method_added hook (which fires for both the scope macro's
+        # definition and our redefinition below) sees the name as owned by
+        # this module and skips it.
+        @_otel_wrapped_scopes ||= {}
+        return super if @_otel_wrapped_scopes[name]
+
+        @_otel_wrapped_scopes[name] = true
         super
 
-        # Guard against double-wrapping on class reload in development
-        @_otel_wrapped_scopes ||= {}
-        return if @_otel_wrapped_scopes[name]
-
-        name_str = name.to_s.freeze
-        original = method(name)
-        define_singleton_method(name) do |*args|
-          relation = original.call(*args)
+        name_str   = name.to_s.freeze
+        alias_name = :"__otel_scope_orig_#{name}"
+        # Alias instead of capturing a bound Method: a bound Method locks self
+        # to the defining class, so inherited scopes would run with self =
+        # parent and re-evaluate default_scope in the wrong class context.
+        # send(alias_name) dispatches with self = the actual receiver.
+        singleton_class.alias_method(alias_name, name)
+        define_singleton_method(name) do |*args, **kwargs, &blk|
+          relation = send(alias_name, *args, **kwargs, &blk)
           if relation.is_a?(::ActiveRecord::Relation)
             relation.instance_variable_set(:@_otel_scope_name, name_str)
           end
           relation
         end
-        @_otel_wrapped_scopes[name] = true
       end
     end
 
     # Captures scope name from Relation at SQL materialization time.
+    #
+    # exec_queries covers record-loading (.to_a, .load). Aggregate and existence
+    # queries take separate paths that never call exec_queries -- count/sum/etc.
+    # go through #calculate, and #pluck / #exists? are their own methods -- so each
+    # needs the same scope-key capture to tag its sql.active_record span.
     module RelationScopeCapture
       def exec_queries(&)
+        scope_name = instance_variable_get(:@_otel_scope_name)
+        Thread.current[SCOPE_THREAD_KEY] = scope_name if scope_name
+        super
+      ensure
+        Thread.current[SCOPE_THREAD_KEY] = nil
+      end
+
+      def calculate(*args, **kwargs, &)
+        scope_name = instance_variable_get(:@_otel_scope_name)
+        Thread.current[SCOPE_THREAD_KEY] = scope_name if scope_name
+        super
+      ensure
+        Thread.current[SCOPE_THREAD_KEY] = nil
+      end
+
+      def pluck(*args, &)
+        scope_name = instance_variable_get(:@_otel_scope_name)
+        Thread.current[SCOPE_THREAD_KEY] = scope_name if scope_name
+        super
+      ensure
+        Thread.current[SCOPE_THREAD_KEY] = nil
+      end
+
+      def exists?(*args)
         scope_name = instance_variable_get(:@_otel_scope_name)
         Thread.current[SCOPE_THREAD_KEY] = scope_name if scope_name
         super
