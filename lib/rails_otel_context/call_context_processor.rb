@@ -42,6 +42,7 @@ module RailsOtelContext
       @custom_span_attributes  = config.custom_span_attributes
       @span_name_formatter     = config.span_name_formatter
       @slow_query_threshold_ms = config.slow_query_threshold_ms
+      @n_plus_one_threshold    = config.n_plus_one_threshold
     end
 
     def on_start(span, _parent_context)
@@ -158,6 +159,9 @@ module RailsOtelContext
       span.set_attribute(AR_METHOD_ATTR, ar_context[:method_name]) if ar_context[:method_name]
       span.set_attribute(AR_SCOPE_ATTR, ar_context[:scope_name]) if ar_context[:scope_name]
       span.set_attribute(AR_QUERY_COUNT_ATTR, ar_context[:query_count]) if ar_context[:query_count]
+      if @n_plus_one_threshold && ar_context[:query_count].to_i >= @n_plus_one_threshold
+        span.set_attribute('db.n_plus_one', true)
+      end
       span.set_attribute(AR_ASYNC_ATTR, true) if ar_context[:async]
     end
 

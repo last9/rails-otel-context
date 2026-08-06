@@ -296,6 +296,10 @@ module RailsOtelContext
       span.set_attribute('code.activerecord.method', ctx[:method_name]) if ctx[:method_name]
       span.set_attribute('code.activerecord.scope', ctx[:scope_name]) if ctx[:scope_name]
       span.set_attribute('db.query_count', ctx[:query_count]) if ctx[:query_count]
+      threshold = RailsOtelContext.configuration.n_plus_one_threshold
+      if threshold && ctx[:query_count].to_i >= threshold
+        span.set_attribute('db.n_plus_one', true)
+      end
       span.set_attribute('db.async', true) if ctx[:async]
 
       formatter = RailsOtelContext.configuration.span_name_formatter

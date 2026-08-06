@@ -511,6 +511,45 @@ class CallContextProcessorTest < Minitest::Test
     RailsOtelContext::ActiveRecordContext.clear!
   end
 
+  def test_n_plus_one_flagged_when_count_meets_threshold
+    RailsOtelContext::ActiveRecordContext.stub_context(
+      model_name: 'Order', method_name: 'Load', query_count: 3
+    )
+    RailsOtelContext.configure { |c| c.n_plus_one_threshold = 3 }
+    proc = new_processor
+    span = FakeSpan.new
+    span.set_attribute('db.system', 'mysql2')
+    proc.on_start(span, nil)
+    assert span.attributes.key?('db.system'), 'span must have db.system attr'
+    assert_equal true, span.attributes['db.n_plus_one']
+  ensure
+    RailsOtelContext::ActiveRecordContext.clear!
+  end
+
+  def test_n_plus_one_not_flagged_below_threshold
+    RailsOtelContext::ActiveRecordContext.stub_context(
+      model_name: 'Order', method_name: 'Load', query_count: 2
+    )
+    RailsOtelContext.configure { |c| c.n_plus_one_threshold = 3 }
+    proc = new_processor
+    span = FakeSpan.new
+    proc.on_start(span, nil)
+    refute span.attributes.key?('db.n_plus_one')
+  ensure
+    RailsOtelContext::ActiveRecordContext.clear!
+  end
+
+  def test_n_plus_one_disabled_by_default
+    RailsOtelContext::ActiveRecordContext.stub_context(
+      model_name: 'Order', method_name: 'Load', query_count: 5
+    )
+    span = FakeSpan.new
+    @processor.on_start(span, nil)
+    refute span.attributes.key?('db.n_plus_one')
+  ensure
+    RailsOtelContext::ActiveRecordContext.clear!
+  end
+
   # ---------------------------------------------------------------------------
   # on_finish — db.slow detection
   # ---------------------------------------------------------------------------
